@@ -1,6 +1,6 @@
 # Version 1 progress and restart checkpoint
 
-Updated: 2026-10-17. Repository: mostangrymike/zvm-tooling.
+Updated: 2026-10-17. Repository: mostangrymike/cms-tooling.
 
 ## Qualified version 1 fixture checkpoint
 
@@ -11,7 +11,7 @@ actual CMS-stage RC0 and one ZTQUAL execution with actual RC0 and complete
 `ZTQUAL CANDIDATE PASS 43` output. The resumed audit did not repeat those writes,
 the build or the execution.
 
-Final audit: zvm-fixture-output-qualified-evidence.json, all 22 steps complete,
+Final audit: cms-fixture-output-qualified-evidence.json, all 22 steps complete,
 passed=true, source_recovery_qualified=true, postbuild_audit_passed=true.
 Journal SHA256: 58e02425f55b224c396a5b726095bbc46900d2ef918650be168b4fd6ca420eb7.
 The exact original and completed-output journals remain bound by their hashes.
@@ -69,9 +69,9 @@ Authorized login/startup during resume reached a fresh Ready(00012) below
 acknowledgement failure. The unchanged command guard then refused helper
 verification because unresolved protocol output remained visible and terminated
 its terminal. No files were written or commands/builds repeated. Sanitized
-observation: zvm-fixture-resume-observation-evidence.json. No terminal remains.
+observation: cms-fixture-resume-observation-evidence.json. No terminal remains.
 
-Prepared validate_zvm_fixture_audit.py as a separate default-off read-only
+Prepared validate_cms_fixture_audit.py as a separate default-off read-only
 post-build continuation. It binds the exact prior journal and current source
 contract, re-verifies both helpers without creation, and retains a new journal.
 The explicit --recover-failed-reader option permits only one guarded Clear then
@@ -85,18 +85,18 @@ builds/build-20261017T163247Z-8481a798/build-report.json. Archive SHA256
 The first audit attempt stopped safely before Clear: reconnect startup's fixed
 CMSLEVEL probe reached clean Ready and the exact failed-frame recovery boundary
 was no longer present. No Clear or fixture/file audit operation ran. Retain
-zvm-fixture-postbuild-audit-evidence.json. Terminal terminated on guard refusal.
+cms-fixture-postbuild-audit-evidence.json. Terminal terminated on guard refusal.
 A new read-only audit, with recovery disabled, completed ASSEMBLE, TEXT and
 LISTING native verification. LISTING is 234 F121 records / 28314 bytes, SHA256
 cab6145f56b7d2a1eb2f8ed75dfc26031119ff81bdf765d96a8af9913b7bc73b,
 snapshot cms-sources/snapshot-2b23124e76dd15c37615d8af. The audit then stopped
 before MODULE reading because its metadata exceeds existing capture limits.
-Evidence: zvm-fixture-postbuild-final-evidence.json; terminal terminated=true.
+Evidence: cms-fixture-postbuild-final-evidence.json; terminal terminated=true.
 No implementation changed between attempts; all 235-test offline gates apply.
 The fixed read-only FILEMETA diagnosis completed and disconnected normally:
-zvm-fixture-module-meta-evidence.json. Exact MODULE geometry is V52312, three
+cms-fixture-module-meta-evidence.json. Exact MODULE geometry is V52312, three
 records, 14 blocks on MNT191; standard source reader limit is 4096 bytes/record.
-Prepared ZMCPOUT.EXEC / zvm_fixture_output.py for only this retained MODULE.
+Prepared ZMCPOUT.EXEC / cms_fixture_output.py for only this retained MODULE.
 The standalone audit's explicit --create-output-reader can create one absent
 random source-verified helper, retaining every old helper. It emits bounded
 4096-byte native chunks with an original logical-record-length map; two reads
@@ -112,7 +112,7 @@ builds/build-20261017T165242Z-5b91ea48/build-report.json. Archive SHA256
 f57f55e57e88c906bc139b767ae02b6fb4602b651e2c1538803b017a8cae8cad.
 The operator's full approval covers this fixture continuation and explicit new
 output-reader provisioning. Final live audit is now active in session79976,
-evidence zvm-fixture-output-qualified-evidence.json, contract
+evidence cms-fixture-output-qualified-evidence.json, contract
 9ad185a569d211cdfb1af36affba93ff73d47158aacf2e977e07a1e3cb4fdf19.
 It pins completed-output journal SHA256
 2861abdf4e55065b3316d8e9c3b784e2c378e3a562b1276c385aa5fddb16ae91.
@@ -166,14 +166,14 @@ global-map absence and exact empty user-FILEDEF check. Step55 `create baseline
 and native readback` has started. ZTQUAL C A1 MAY NOW EXIST (including partial
 state until the journal confirms native readback); never rerun create blindly.
 Process exec session66836 remains active and owns the only dedicated terminal.
-Inspect zvm-fixture-qualified-live-evidence.json for the newer authoritative
+Inspect cms-fixture-qualified-live-evidence.json for the newer authoritative
 result; all journal writes are flushed/fsynced before/after each step.
 
 Remote CI run39047781434 completed successfully for a11645bae0c84d076ecdbe6d13c7e978b1809a2c.
 Third live attempt is active in exec session66836 (one dedicated s3270).
 Startup CMSLEVEL verification and re-verification of ZM537EF1/ZM000175 passed;
 fresh compiler preconditions are running. The authoritative current state is
-zvm-fixture-qualified-live-evidence.json. Do not start a second terminal or
+cms-fixture-qualified-live-evidence.json. Do not start a second terminal or
 modify bound implementation files while it is running. Progress documentation
 can be updated independently; source contract validation runs before every step.
 
@@ -182,7 +182,7 @@ builds/build-20261017T160307Z-3181285a/build-report.json, 223 tests, zero
 failures/errors/skips, all protocol/review/rehearsal gates passed. Bundle SHA256
 85e6923a7fbec0096bdabe12d750d19bee856c0aca2c29ebcf662b7927c4e40f.
 Exact contract 177b1481ad1571b3a407cccee70b0974178e5bfe87e3d803f349b7dca43c088f.
-New evidence zvm-fixture-qualified-live-evidence.json; --reuse-fixture-helper
+New evidence cms-fixture-qualified-live-evidence.json; --reuse-fixture-helper
 re-verifies ZM000175 instead of creating another helper. Local commit87c6799
 matches remote commit a11645bae0c84d076ecdbe6d13c7e978b1809a2c by source tree
 0a05e693fcca5db68280aacfbc7f227e9bae5095. Remote CI run39047781434 is in progress.
@@ -200,13 +200,13 @@ fixed retained helper instead of creating another; no arbitrary helper name.
 New tests cover this message, reuse, real partial-transfer fail-stop, metadata
 change before replacement and existing-backup refusal. Full offline validation
 must pass before a third run with a new evidence filename. Do not overwrite
-zvm-fixture-probe-live-evidence.json or its helper.
+cms-fixture-probe-live-evidence.json or its helper.
 
 Remote checkpoint validation: draft PR
-https://github.com/mostangrymike/zvm-tooling/pull/1 at remote commit
+https://github.com/mostangrymike/cms-tooling/pull/1 at remote commit
 7ce6948066c59022a612eb26ca550a2a9252f27c. GitHub Actions run 39047453523
 completed with conclusion=success (observed through the connector), URL:
-https://github.com/mostangrymike/zvm-tooling/actions/runs/39047453523.
+https://github.com/mostangrymike/cms-tooling/actions/runs/39047453523.
 This is real remote CI for that source checkpoint, not live CMS qualification.
 During the active second live run, CMSCLNK native hash revalidation passed;
 GCCE native readback is currently in progress. Journal remains the authoritative
@@ -219,7 +219,7 @@ do not overwrite/erase or assume its session verification persists after a
 disconnect. It is separate from all older command/download/scratch helpers.
 Fresh disk identity, all declared command-shadow absences and GCC/ASSEMBLE
 binary presence checks passed. Re-downloading/pinning installed compiler sources
-is in progress in exec session45033, evidence zvm-fixture-probe-live-evidence.json.
+is in progress in exec session45033, evidence cms-fixture-probe-live-evidence.json.
 No fixture source or backup created yet. Never start another terminal while
 this workflow owns its dedicated process.
 
@@ -228,15 +228,15 @@ full isolated build: builds/build-20261017T155611Z-6c0bd98f/build-report.json,
 218 tests, no failures/errors/skips, all protocol/review/rehearsal checks pass.
 Bundle SHA256 4eb06298f7e80c2a992a2e75476ee85fdefa09ee36a6f2d0394902dfe78b226d.
 Current live contract bc559b9bfccf4d7c3682c7ee81cb5906851bfa9621ffe5287e950b6c23e98436.
-Second attempt evidence will be zvm-fixture-probe-live-evidence.json.
+Second attempt evidence will be cms-fixture-probe-live-evidence.json.
 Local commits 00b7c4d and 38b596c are saved. Via the GitHub connector, identical
 source tree ba2735ff4af03d848d2a083ac482806d569ce2ce was saved at remote commit
 7ce6948066c59022a612eb26ca550a2a9252f27c on
-https://github.com/mostangrymike/zvm-tooling/tree/codex/disposable-c-qualification.
+https://github.com/mostangrymike/cms-tooling/tree/codex/disposable-c-qualification.
 Remote and local commit IDs differ because the connector creates commits;
 their source tree identity was checked. No merge into main or production write.
 
-Live attempt zvm-fixture-live-evidence.json stopped at reconnect startup before
+Live attempt cms-fixture-live-evidence.json stopped at reconnect startup before
 helper/source creation. Login reached CP READ; BEGIN printed bare CMS at row9
 with an empty verified field but no Ready. No source writes, builds or helper
 creation occurred; disconnect terminated=true. Failure screen preserved. Fixed
@@ -256,14 +256,14 @@ no failures/errors/skips, plus all protocol/review/rehearsal gates. 58-file
 archive SHA256 98bd840d6a9397cd630057b61609900d8aa2431f0683b7c8cce924e7bba718e1.
 Only explanatory documentation changed after this bundle. Exact fixed execution
 contract SHA256 b2a24eaabb85a8f63bf100da8e266477941c18c8078c46a1614e28cf16d9ffb6.
-Next live evidence file: zvm-fixture-live-evidence.json. Explicit recovery
+Next live evidence file: cms-fixture-live-evidence.json. Explicit recovery
 qualification is enabled for only the freshly created ZTQUAL source. Do not
 repeat this run if evidence already exists; inspect its last intent/result first.
 
-Implementation checkpoint: added validate_zvm_fixture.py (default-off fixed
+Implementation checkpoint: added validate_cms_fixture.py (default-off fixed
 ZTQUAL executor) and ZMCPQUAL.EXEC (only BUILD/TEST/FILEDEFS; unchanged native
 capture protocol tail). Existing MCP allowlists/registration and review-only
-planner remain unchanged. New test_zvm_fixture.py initially passes 10 tests,
+planner remain unchanged. New test_cms_fixture.py initially passes 10 tests,
 including every workflow failure boundary, wrong contract/recovery flag,
 protected targets, native/RC/marker failures, pinned local artifact tampering
 and exclusive owner-only journaling. Full isolated build and live run pending.
@@ -296,7 +296,7 @@ remaining subscription quota API is available, so save progress incrementally
 rather than promise detection of zero. Active operator driver 3051/session1632
 was interrupted with SIGINT to execute its disconnect/finally block after
 write_stdin to the old approved session was rejected by the changed policy.
-Verify session_terminated in zvm-operator-session-evidence.json before reconnect.
+Verify session_terminated in cms-operator-session-evidence.json before reconnect.
 All queued read-only queries finished: ZTQUAL SYSUT1/2/3 A4, ZTQUAL LOADMAP A5,
 LOAD MAP A5 and ZTQBACK C A1 were absent (actual RC28); LISTFILE ZTQUAL * A
 returned RC28. No source has been uploaded, replaced or compiled yet.
@@ -323,12 +323,12 @@ The approved single-Clear diagnostic ran. Exactly one Clear was sent; the held
 page cleared but no fresh Ready appeared within 20 seconds. Subsequent screens
 were blank RUNNING and locked/unformatted, so no availability probes ran.
 The dedicated process disconnected. Evidence:
-zvm-compiler-availability-recovery-evidence.json. Do not label this successful
+cms-compiler-availability-recovery-evidence.json. Do not label this successful
 CMS recovery or infer the cause of the original DFT failure. The later broad
 read/write approval permits continued diagnosis. A single serialized operator
 session is active under that authority (local driver
-/private/tmp/zvm_operator_console.py, exec session 1632). Evidence is saved
-after every operation in zvm-operator-session-evidence.json. The CP console
+/private/tmp/cms_operator_console.py, exec session 1632). Evidence is saved
+after every operation in cms-operator-session-evidence.json. The CP console
 answered QUERY VIRTUAL DASD across two captured pages, confirming attached
 029D (20-cylinder compiler disk) and 0600 (1600-cylinder VMCOM1). BEGIN resumed
 the guest without producing CMS Ready. One HX immediate command was submitted
@@ -375,10 +375,10 @@ MORE. This is an observation, not an established root cause. The server
 terminated its dedicated process; a follow-up screen correctly reported no
 session and disconnect confirmed no active terminal. No helper was created or
 executed, no source download completed, and no compile/upload occurred.
-Complete evidence: zvm-compiler-audit-attempt-evidence.json (local, ignored).
+Complete evidence: cms-compiler-audit-attempt-evidence.json (local, ignored).
 Do not retry DFT blindly or treat the helper as verified.
 
-Added validate_zvm_compiler.py, a fixed read-only availability diagnostic that
+Added validate_cms_compiler.py, a fixed read-only availability diagnostic that
 does not need helper execution, DFT or compiler execution. Its exact commands
 are QUERY DISK, STATE IND$FILE MODULE on A/B/D/E/F/S/T/Y, and STATE CMSCLNK/GCCE
 EXEC on A/F. It records echoed-command terminal Ready RCs and sanitized screens,
@@ -392,12 +392,12 @@ build passed all 197 tests and protocol checks:
 builds/build-20261017T145838Z-bd1d788a/build-report.json.
 
 The standalone availability diagnostic first encountered a sandbox localhost
-denial (zvm-compiler-availability-evidence.json, no input). The approved
+denial (cms-compiler-availability-evidence.json, no input). The approved
 unsandboxed diagnostic reached CP READ and sent the authorized BEGIN once.
 During startup recheck it observed MORE instead of the expected blank RUNNING
 boundary and correctly stopped without extra Enter or Clear. No availability
 queries ran. The process terminated; complete sanitized evidence is in
-zvm-compiler-availability-live-evidence.json. This is not a repeated DFT attempt.
+cms-compiler-availability-live-evidence.json. This is not a repeated DFT attempt.
 
 Added an explicit startup_page_hold_observed stop result (no paging action by
 normal startup) and a default-off --advance-startup-more option in the local
@@ -420,7 +420,7 @@ and were checked to exclude both locally configured credential values.
 The operator explicitly granted approval for one guarded startup Clear and the
 fixed read-only probes on 2026-10-17. The reviewed command has now been started
 with --advance-startup-more; results will be recorded in
-zvm-compiler-availability-recovery-evidence.json. No DFT retry, compiler run,
+cms-compiler-availability-recovery-evidence.json. No DFT retry, compiler run,
 disk-access change, upload or cleanup is authorized by this approval.
 No DFT-recovery fix has been claimed or implemented.
 
@@ -447,13 +447,13 @@ retained ZV scratch files are disposable qualification targets.
   read-only inspection attempts are recorded above. No upload, replacement,
   compiler execution, cleanup or production repository change has occurred.
 - Created repository .venv using Python 3.14 and installed
-  requirements-zvm-mcp.txt. pip check passes. Dependency bootstrap required
+  requirements-cms-mcp.txt. pip check passes. Dependency bootstrap required
   approved network access; the first sandboxed attempt could not resolve PyPI.
 - Initial offline build passed 177 tests with zero failures/errors/skips and
   real disconnected stdio protocol checks. Report:
   builds/build-20261017T144618Z-17c83bb6/build-report.json. This precedes the
   new native comparison implementation.
-- Implemented zvm_native_review.py: offline native snapshot comparison bound
+- Implemented cms_native_review.py: offline native snapshot comparison bound
   to the exact operation and snapshot manifest hashes, with baseline, backup,
   candidate and restored roles. No host adapter or new MCP capability. It
   preserves all operation blockers and false execution/safety flags.
@@ -499,7 +499,7 @@ retained ZV scratch files are disposable qualification targets.
    no host command or reconnect is needed to resume local review.
 2. Inspect Git status and canonical GitHub checkpoint/CI before further edits.
    Use .venv/bin/python; rerun offline qualification after implementation changes.
-3. Do not rerun validate_zvm_fixture.py --live against this existing namespace.
+3. Do not rerun validate_cms_fixture.py --live against this existing namespace.
    Do not create another output helper merely to reread retained evidence.
    Any specifically requested read-only re-audit must reverify ZME09C7C with
    --output-reader ZME09C7C, bind exact prior journal hashes and use new evidence.

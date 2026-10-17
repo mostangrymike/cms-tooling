@@ -7,14 +7,14 @@ The original full captures remain local and are not distribution inputs.
 
 | Fixture | Original local capture |
 | --- | --- |
-| hercules_banner | zvm-live-evidence.json / connect.screen |
-| login_form | zvm-ec2-observation.json / final snapshot |
-| vm_read | zvm-login-evidence.json / login.screen |
-| reconnect_running | zvm-startup-running-timeout-evidence.json / startup.screen |
-| cms_boundary | zvm-startup-cms-line-evidence.json / startup screen, actions, outcome |
+| hercules_banner | cms-live-evidence.json / connect.screen |
+| login_form | cms-ec2-observation.json / final snapshot |
+| vm_read | cms-login-evidence.json / login.screen |
+| reconnect_running | cms-startup-running-timeout-evidence.json / startup.screen |
+| cms_boundary | cms-startup-cms-line-evidence.json / startup screen, actions, outcome |
 | failed_login | mainframe_surface.log / screen state 2 |
 
-Tests get a fresh copy with `recorded_screen()` from `test_zvm_fixtures.py`.
+Tests get a fresh copy with `recorded_screen()` from `test_cms_fixtures.py`.
 They do not require credentials, personal live evidence or network access.
 
 ## Disposable C qualification sources

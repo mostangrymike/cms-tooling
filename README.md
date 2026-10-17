@@ -1,10 +1,10 @@
-# zvm-tooling
+# cms-tooling
 
 Guarded local automation for IBM z/VM CMS through a stdio MCP server and one
 persistent s3270 terminal. Starts disconnected; terminal input and host writes
 are disabled by default.
 
-See [setup and tool documentation](README-zvm-mcp.md),
+See [setup and tool documentation](README-cms-mcp.md),
 [qualification boundaries](PIPELINE-READINESS.md), and
 [migration provenance](MIGRATION.md).
 
@@ -18,8 +18,8 @@ Requires Python 3.12+, Git, s3270 and Regina REXX (`rexx`). From this directory:
 
 ```sh
 python3 -m venv .venv
-.venv/bin/python -m pip install -r requirements-zvm-mcp.txt
-.venv/bin/python -B build_zvm_tooling.py
+.venv/bin/python -m pip install -r requirements-cms-mcp.txt
+.venv/bin/python -B build_cms_tooling.py
 ```
 
 The build runs entirely offline, including protocol checks and local review
@@ -33,7 +33,7 @@ credentials, local snapshots or live capture artifacts are included here.
 
 ## Fixed disposable C qualification
 
-`validate_zvm_fixture.py` prints an offline contract by default. The separate
+`validate_cms_fixture.py` prints an offline contract by default. The separate
 live path requires `--live --qualify-recovery`, the exact printed
 `--contract-sha256`, a local `--credential-file` and a new `--output` evidence
 file. It is limited to newly created ZTQUAL C A1, ZTQBACK C A1 and declared
@@ -43,7 +43,7 @@ Every step is checkpointed; a failure stops without retry, restore or cleanup.
 Success qualifies that fixture only; production writer exclusion and deployment
 remain unresolved. See V1-PROGRESS.md for actual validation state.
 
-`validate_zvm_fixture_audit.py` provides a separate read-only continuation for
+`validate_cms_fixture_audit.py` provides a separate read-only continuation for
 the retained run that stopped during LISTING capture after successful build/test.
 It pins the old journal hash and a new source contract, verifies all output/source/
 backup snapshots, transient absence, exact inventories and FILEDEF state, and
