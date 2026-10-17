@@ -517,6 +517,10 @@ class Session:
                             "actions": [], "cms_command_complete": None}
                 while time.monotonic() < deadline:
                     state = current["state"]
+                    if state in {'more', 'holding'}:
+                        return {'ok': False, 'outcome': 'startup_page_hold_observed',
+                                'screen': current, 'actions': actions, 'snapshots': snapshots,
+                                'cms_command_complete': None}
                     rows = "\n".join(current["rows"]).upper()
                     fields = [f for f in current["fields"] if not f["protected"]]
                     resumed_blank = (state == "unknown" and actions == ["BEGIN", "Enter"]
@@ -546,6 +550,13 @@ class Session:
                         # Observe it without sending the now-unnecessary AID.
                         return {'outcome': 'cms_ready_observed', 'screen': check,
                                 'actions': actions, 'snapshots': snapshots,
+                                'cms_command_complete': None}
+                    if check['state'] in {'more', 'holding'}:
+                        # A reconnect can expose pending held output while the
+                        # startup field is being checked. Capture and stop;
+                        # startup authority never includes clearing that page.
+                        return {'ok': False, 'outcome': 'startup_page_hold_observed',
+                                'screen': check, 'actions': actions, 'snapshots': snapshots,
                                 'cms_command_complete': None}
                     if (check["state"] != state or check["cursor"] != {"row": 23, "column": 1, "protected": False}
                             or target != fields):
@@ -583,7 +594,8 @@ class Session:
                 return {"ok": False, "outcome": "startup_transition_timeout", "screen": current,
                         "snapshots": snapshots, "actions": actions, "cms_command_complete": None}
             result = self._run("startup", work, timeout + 2)
-            if verify_cms and not result["ok"] and self.em is not None:
+            if (verify_cms and not result["ok"] and self.em is not None
+                    and result.get('outcome') != 'startup_page_hold_observed'):
                 from diagnose_zvm_cms import probe
                 verified = probe(self, result, host_display)
                 return {**verified, "startup": result}

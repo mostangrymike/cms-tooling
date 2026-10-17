@@ -4,6 +4,40 @@ The supported development boundary is verified source download, local editing,
 review plans and explicitly parameterized create-only scratch upload. Production
 replacement and CMS build/test execution are not implemented or enabled.
 
+Version 1 aims to qualify one disposable C development cycle; see
+[V1-PROGRESS.md](V1-PROGRESS.md) for restart state and
+[CMS-C-RECIPE.md](CMS-C-RECIPE.md) for the recovered compiler sequence.
+
+## Local native evidence comparison
+
+`zvm_native_review.py` compares an existing source snapshot with an exact,
+revalidated operation review. It supports `baseline`, `backup`, `candidate`
+and `restored` roles. All compare native bytes, record boundaries, format,
+file identity and disk label. The baseline role also requires identical
+original metadata. Backup requires an explicit distinct unprotected A1 file
+ID outside all recipe inputs/outputs. Snapshots and review artifacts are
+read-only; a wrong manifest hash, stale review or mismatch fails closed.
+
+```sh
+.venv/bin/python -B zvm_native_review.py \
+  --root /absolute/git/worktree/sources \
+  --edit-id edit-EXACT_ID --operation-id operation-EXACT_ID \
+  --operation-sha256 EXACT_OPERATION_SHA256 \
+  --snapshot-id snapshot-EXACT_ID \
+  --snapshot-manifest-sha256 EXACT_MANIFEST_SHA256 --role candidate
+```
+
+Substitute actual generated identifiers and SHA-256 values. For backup add
+`--role backup --backup-target 'EXACT TYPE A1'` instead of the candidate role.
+Optional `--credential-file` enables rejection of locally known credentials.
+Standalone stdout is a JSON comparison report; errors omit source/error text.
+This CLI adds no MCP tool, launch capability or host adapter.
+
+`local_comparison_passed=true` establishes equality of local artifacts only.
+Synthetic or old snapshots can match. It does not attest host provenance,
+freshness, writer exclusion, backup durability or recovery authority; all
+execution/replacement-safety flags and operation blockers remain unchanged.
+
 Live qualification on 2026-10-16 created `ZVF69FE6 EXEC A1`, verified corrected
 DFT readback, and independently verified two native reads plus unchanged metadata:
 63 F80 records / 5040 bytes, exactly matching the approved candidate SHA-256.

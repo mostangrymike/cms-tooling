@@ -89,6 +89,42 @@ class StartupTests(unittest.TestCase):
         self.assertFalse(result["ok"])
         self.assertNotIn("Enter", fake.calls)
 
+    def test_hold_arriving_during_field_recheck_stops_without_any_aid(self):
+        for indicator in ('MORE...', 'HOLDING'):
+            s, fake = self.session()
+            original = fake.exec_command
+            def transition(action):
+                if action == b'MoveCursor(22,0)':
+                    fake.rows[-1] = (' ' * 60 + indicator).ljust(80)
+                return original(action)
+            fake.exec_command = transition
+            result = s.startup(verify_cms=True)
+            self.assertFalse(result['ok'], result)
+            self.assertEqual(result['outcome'], 'startup_page_hold_observed')
+            self.assertEqual(result['actions'], [])
+            self.assertNotIn('Enter', fake.calls)
+            self.assertNotIn('Clear', fake.calls)
+            self.assertFalse(any(call.startswith('String') for call in fake.calls))
+            s.disconnect()
+
+    def test_hold_after_reconnect_begin_is_observed_without_automatic_clear(self):
+        s, fake = self.session('cp_read')
+        fake.change = False
+        original = fake.exec_command
+        def transition(action):
+            result = original(action)
+            if action == b'Enter':
+                fake.rows[-1] = (' ' * 60 + 'MORE...').ljust(80)
+            return result
+        fake.exec_command = transition
+        result = s.startup(verify_cms=True)
+        self.assertFalse(result['ok'], result)
+        self.assertEqual(result['outcome'], 'startup_page_hold_observed')
+        self.assertEqual(result['actions'], ['BEGIN', 'Enter'])
+        self.assertEqual(fake.calls.count('Enter'), 1)
+        self.assertNotIn('Clear', fake.calls)
+        s.disconnect()
+
     def test_existing_input_refused_even_when_redacted(self):
         s, fake = self.session()
         fake.rows[22] = "DO NOT SUBMIT".ljust(80)
