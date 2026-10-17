@@ -4,6 +4,20 @@ Updated: 2026-10-17. Repository: mostangrymike/zvm-tooling.
 
 ## Active continuation: compiler inventory audit
 
+Live attempt zvm-fixture-live-evidence.json stopped at reconnect startup before
+helper/source creation. Login reached CP READ; BEGIN printed bare CMS at row9
+with an empty verified field but no Ready. No source writes, builds or helper
+creation occurred; disconnect terminated=true. Failure screen preserved. Fixed
+executor now requests the existing explicit QUERY CMSLEVEL verification probe.
+Its guard additionally accepts only the exact observed bare-CMS/BEGIN/banner
+shape after actions BEGIN,Enter; arbitrary RUNNING/input screens remain refused.
+Added offline guard and failed-result journal tests; all offline gates must
+pass before a new attempt. Existing evidence must not be overwritten.
+Implementation saved in local commit 00b7c4d on branch
+codex/disposable-c-qualification. Shell Git push failed due absent HTTPS
+credentials; no remote branch/CI yet. Current reconnect/probe fixes are newer
+uncommitted work. Native backup/source have still not been created.
+
 Ready for live fixed qualification: latest isolated build
 builds/build-20261017T155226Z-5b386974/build-report.json passed all 216 tests,
 no failures/errors/skips, plus all protocol/review/rehearsal gates. 58-file

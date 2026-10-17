@@ -242,6 +242,25 @@ class StartupTests(unittest.TestCase):
             self.assertFalse(s.startup(verify_cms=True)["ok"])
             query.assert_called_once()
 
+    def test_bare_cms_reconnect_probe_accepts_only_exact_observed_shape(self):
+        import copy
+        from diagnose_zvm_cms import probe_boundary
+        captured = recorded_screen('cms_boundary')
+        captured['actions'] = ['BEGIN', 'Enter']
+        rows = captured['screen']['rows']
+        rows[1] = 'z/VM Version 6 Release 3.0'.ljust(80)
+        rows[6] = 'BEGIN'.ljust(80)
+        rows[7:22] = [' ' * 80] * 15
+        rows[8] = 'CMS'.ljust(80)
+        self.assertTrue(probe_boundary(captured))
+        for row, text in ((6, 'SOMETHING ELSE'), (8, 'Application input'), (10, 'unrelated output')):
+            changed = copy.deepcopy(captured)
+            changed['screen']['rows'][row] = text.ljust(80)
+            self.assertFalse(probe_boundary(changed))
+        changed = copy.deepcopy(captured)
+        changed['screen']['fields'][0]['empty'] = False
+        self.assertFalse(probe_boundary(changed))
+
 
 if __name__ == "__main__":
     unittest.main()

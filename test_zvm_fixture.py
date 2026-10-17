@@ -176,6 +176,13 @@ class FixtureTests(unittest.TestCase):
         with self.assertRaises(OSError):
             fixture.Journal(link, self.declared, self.digest)
 
+    def test_failed_startup_result_is_retained_in_journal(self):
+        journal = self.journal()
+        result = {'ok': False, 'outcome': 'startup_transition_timeout', 'actions': ['BEGIN', 'Enter']}
+        with patch('builtins.print'), self.assertRaises(fixture.StepFailure):
+            journal.step('startup', lambda: fixture.require(result))
+        self.assertEqual(json.loads((self.folder / 'evidence.json').read_bytes())['steps'][-1]['result'], result)
+
     def test_real_adapter_refuses_protected_target_and_changed_baseline_before_transfer(self):
         session = Mock()
         adapter = fixture.LiveAdapter(session, self.journal())

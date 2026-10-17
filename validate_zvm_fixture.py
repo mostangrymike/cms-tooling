@@ -46,7 +46,7 @@ def native_source(payload):
 def contract():
     files = ('validate_zvm_fixture.py', 'ZMCPQUAL.EXEC', 'zvm_commands.py',
         'zvm_capture.py', 'zvm_download.py', 'zvm_edit.py', 'zvm_native_review.py',
-        'zvm_operations.py', 'zvm_rehearsal.py', 'zvm_mcp.py', 'zvm_credentials.py',
+        'zvm_operations.py', 'zvm_rehearsal.py', 'zvm_mcp.py', 'zvm_credentials.py', 'diagnose_zvm_cms.py',
         'fixtures/qualification/baseline/ZTQUAL.C', 'fixtures/qualification/candidate/ZTQUAL.C')
     sources = {name: sha(read_file(ROOT / name, 2 * 1048576)) for name in files}
     baseline, candidate = (native_source(read_file(ROOT / f'fixtures/qualification/{role}/ZTQUAL.C', 8192))
@@ -63,9 +63,15 @@ def contract():
         'limitation': 'Fresh disposable namespace only; absence/readback are not atomic and do not exclude other writers. Installed compiler binaries are trusted environment inputs, not independently hashed here.'}
 
 
+class StepFailure(ValueError):
+    def __init__(self, result):
+        super().__init__('Step failed; see sanitized step evidence')
+        self.result = result
+
+
 def require(result):
     if not isinstance(result, dict) or result.get('ok') is not True:
-        raise ValueError('Step failed; see sanitized step evidence')
+        raise StepFailure(result)
     return result
 
 
@@ -118,6 +124,8 @@ class Journal:
             return result
         except BaseException as exc:
             entry.update(state='failed', error_type=type(exc).__name__)
+            if isinstance(exc, StepFailure):
+                entry['result'] = exc.result
             self.persist()
             raise
 
@@ -335,7 +343,7 @@ def main():
         screen = connected['screen']
         if screen['state'] == 'login' or screen.get('screen_kind') == 'hercules_banner':
             journal.step('login', lambda: require(session.login()))
-        journal.step('startup', lambda: require(session.startup(timeout=45)))
+        journal.step('startup', lambda: require(session.startup(timeout=45, verify_cms=True)))
         journal.step('verify existing read-only helper', lambda: require(session.runner.prepare(create=False)))
         journal.step('create and verify fixed fixture helper', lambda: require(adapter.builder.prepare(create=True)))
         execute(adapter, journal, declared, digest, args.qualify_recovery)
