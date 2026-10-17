@@ -4,9 +4,18 @@ The supported development boundary is verified source download, local editing,
 review plans and explicitly parameterized create-only scratch upload. Production
 replacement and CMS build/test execution are not implemented or enabled.
 
-Version 1 aims to qualify one disposable C development cycle; see
+Version 1 qualifies one disposable C development cycle; see
 [V1-PROGRESS.md](V1-PROGRESS.md) for restart state and
 [CMS-C-RECIPE.md](CMS-C-RECIPE.md) for the recovered compiler sequence.
+
+That fixed ZTQUAL cycle passed on 2026-10-17: native backup/replacement and
+explicit successful-path source recovery, one RC0 build/test with the expected
+candidate marker, all four native outputs and final source/backup/transient/
+inventory/FILEDEF checks. The MODULE required a separately source-verified,
+output-only reader for its three V52312 records; standard source limits remain
+unchanged. Retained evidence and exact hashes are in V1-PROGRESS.md. This
+qualifies that disposable fixture, while production execution and writer
+exclusion gates remain unresolved.
 
 ## Local native evidence comparison
 

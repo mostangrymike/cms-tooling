@@ -173,6 +173,42 @@ class DownloadTests(unittest.TestCase):
         self.assertFalse(d.download('TEST','EXEC','A',timeout=30)['ok'])
         self.assertTrue(1<=budgets[0]<=30)
 
+    def test_long_download_budget_keeps_each_capture_bounded(self):
+        _,d,_=self.service()
+        d.max_timeout=900
+        run=d.reader.run
+        budgets=[]
+        elapsed=iter((0,1,200,400,401))
+        def timed_run(command,timeout):
+            budgets.append(timeout)
+            return run(command,timeout)
+        d.reader.run=timed_run
+        with patch('zvm_download.time.monotonic',side_effect=lambda:next(elapsed)):
+            result=d.download('TEST','EXEC','A',timeout=900)
+        self.assertTrue(result['ok'],result)
+        self.assertEqual(budgets,[300]*4)
+
+    def test_exhausted_total_budget_stops_before_next_read(self):
+        _,d,calls=self.service()
+        d.max_timeout=900
+        with patch('zvm_download.time.monotonic',side_effect=(0,1,901)):
+            result=d.download('TEST','EXEC','A',timeout=900)
+        self.assertFalse(result['ok'])
+        self.assertIn('deadline exceeded',result['message'])
+        self.assertEqual(calls,['FILEMETA TEST EXEC A'])
+        self.assertFalse(self.root.exists())
+
+    def test_download_budget_validation_precedes_terminal_activity(self):
+        _,d,calls=self.service()
+        for timeout in (True,29,901,900.0):
+            self.assertFalse(d.download('TEST','EXEC','A',timeout=timeout)['ok'])
+        self.assertEqual(calls,[])
+
+    def test_standard_download_cannot_request_audit_only_budget(self):
+        _,d,calls=self.service()
+        self.assertFalse(d.download('TEST','EXEC','A',timeout=900)['ok'])
+        self.assertEqual(calls,[])
+
     def test_local_write_failure_removes_only_new_partial_snapshot(self):
         _,d,_=self.service()
         original=Path.open

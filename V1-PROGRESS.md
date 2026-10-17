@@ -2,7 +2,132 @@
 
 Updated: 2026-10-17. Repository: mostangrymike/zvm-tooling.
 
-## Active continuation: compiler inventory audit
+## Qualified version 1 fixture checkpoint
+
+The disposable ZTQUAL C development cycle is qualified. The original live
+journal proves native baseline/backup creation, candidate replacement,
+explicit successful-path source recovery and reapply, one CMSCLNK build with
+actual CMS-stage RC0 and one ZTQUAL execution with actual RC0 and complete
+`ZTQUAL CANDIDATE PASS 43` output. The resumed audit did not repeat those writes,
+the build or the execution.
+
+Final audit: zvm-fixture-output-qualified-evidence.json, all 22 steps complete,
+passed=true, source_recovery_qualified=true, postbuild_audit_passed=true.
+Journal SHA256: 58e02425f55b224c396a5b726095bbc46900d2ef918650be168b4fd6ca420eb7.
+The exact original and completed-output journals remain bound by their hashes.
+
+| Retained native output | Records / bytes | SHA256 |
+| --- | --- | --- |
+| ZTQUAL ASSEMBLE A1 | 47 F80 / 3760 | cb0fd2b0eeee7dc26df726bb12a60e9dd44a2c90bf9f3509904e250183853df9 |
+| ZTQUAL TEXT A1 | 10 F80 / 800 | 06b33b399c592ba799d1493623dc9d1a583530a99732ec5b6a537afeda6d46ab |
+| ZTQUAL LISTING A1 | 234 F121 / 28314 | cab6145f56b7d2a1eb2f8ed75dfc26031119ff81bdf765d96a8af9913b7bc73b |
+| ZTQUAL MODULE A1 | 3 V52312 / 56280 | d2512ab7d095851ad254db02dba32869a8e50dd93c9e805b0a361c4240468707 |
+
+MODULE native record lengths are [80, 52312, 3888]. The output-only reader
+ZME09C7C EXEC A was created absent and source-verified, and must be retained.
+It is separate from all existing helpers. MODULE passed two identical native
+reads and matching metadata. Earlier ASSEMBLE/TEXT/LISTING snapshots were
+revalidated locally and retained honestly as earlier host-read evidence.
+
+Fresh final source and backup native hashes matched the approved candidate
+and baseline respectively. All six declared transients returned actual RC28;
+exact ZTQUAL and ZTQBACK inventories returned actual RC0. FILEDEF returned
+actual RC0 and exactly `DMSFLD324I No user defined FILEDEFs in effect`, followed
+by the correlated fresh Ready boundary. Disconnect terminated=true.
+
+All qualification files, outputs and helpers remain retained. No fixture source
+write, rebuild, execution or cleanup occurred during this resumed audit; its
+only CMS file creation was the new output-only helper. Production qualification,
+writer exclusion and replacement safety remain false. Successful-path fixture
+recovery, offline failure tests and observed read-capture fail-stops do not
+qualify general production recovery or fault injection.
+
+Implementation passed 245 offline tests with zero failures/errors/skips and
+all isolated protocol/review/rehearsal gates. The exact published source commit
+f0a38d222db224b6f090b43e3f15c5cf61607317 passed both GitHub Actions runs
+39052151534 and 39052154783. This subsequent checkpoint records the final
+qualification documentation; implementation/source contract remains
+9ad185a569d211cdfb1af36affba93ff73d47158aacf2e977e07a1e3cb4fdf19.
+
+No live continuation is needed. Do not rerun create/build to reproduce evidence.
+No dedicated terminal remains active. The separate production project and thin
+GITC23 wrapper are outside this completed tooling-fixture qualification.
+
+## Qualification history (historical checkpoints)
+
+Resume inspection (2026-10-17): the formerly active session66836 has ended.
+The authoritative journal stopped at `native output ZTQUAL LISTING A1` with
+CaptureError, after one complete 234-record / 28314-byte native read and a
+partial second read. No LISTING snapshot, MODULE verification or final audit
+pass exists. Prior journal SHA256:
+422d5b641ffdf6460c4c4cb23a8bf3ea6dde5ee59750e909125b00cd4a4bde3d.
+The source recovery, candidate reapply, build/test, ASSEMBLE and TEXT results
+remain complete. Do not rerun the original create/build workflow.
+
+Authorized login/startup during resume reached a fresh Ready(00012) below
+`ZM1 91CDA5088C6974C7 F 660 ACK`: the abandoned reader terminated with an
+acknowledgement failure. The unchanged command guard then refused helper
+verification because unresolved protocol output remained visible and terminated
+its terminal. No files were written or commands/builds repeated. Sanitized
+observation: zvm-fixture-resume-observation-evidence.json. No terminal remains.
+
+Prepared validate_zvm_fixture_audit.py as a separate default-off read-only
+post-build continuation. It binds the exact prior journal and current source
+contract, re-verifies both helpers without creation, and retains a new journal.
+The explicit --recover-failed-reader option permits only one guarded Clear then
+QUERY CMSLEVEL, requiring the exact failed nonce/sequence and fresh Ready(00012)
+at a blank verified command field. The operator explicitly approved this
+recovery and subsequent read-only audit with "approval yes", followed by
+"approved for all" during this resume. Isolated offline build passed all 235
+tests with zero failures/errors/skips plus protocol/review/rehearsal gates:
+builds/build-20261017T163247Z-8481a798/build-report.json. Archive SHA256
+2a45dd4cef85f63e2c6d384dfbbf359dabddd15340cff2a242aaa2febf9ba0d0.
+The first audit attempt stopped safely before Clear: reconnect startup's fixed
+CMSLEVEL probe reached clean Ready and the exact failed-frame recovery boundary
+was no longer present. No Clear or fixture/file audit operation ran. Retain
+zvm-fixture-postbuild-audit-evidence.json. Terminal terminated on guard refusal.
+A new read-only audit, with recovery disabled, completed ASSEMBLE, TEXT and
+LISTING native verification. LISTING is 234 F121 records / 28314 bytes, SHA256
+cab6145f56b7d2a1eb2f8ed75dfc26031119ff81bdf765d96a8af9913b7bc73b,
+snapshot cms-sources/snapshot-2b23124e76dd15c37615d8af. The audit then stopped
+before MODULE reading because its metadata exceeds existing capture limits.
+Evidence: zvm-fixture-postbuild-final-evidence.json; terminal terminated=true.
+No implementation changed between attempts; all 235-test offline gates apply.
+The fixed read-only FILEMETA diagnosis completed and disconnected normally:
+zvm-fixture-module-meta-evidence.json. Exact MODULE geometry is V52312, three
+records, 14 blocks on MNT191; standard source reader limit is 4096 bytes/record.
+Prepared ZMCPOUT.EXEC / zvm_fixture_output.py for only this retained MODULE.
+The standalone audit's explicit --create-output-reader can create one absent
+random source-verified helper, retaining every old helper. It emits bounded
+4096-byte native chunks with an original logical-record-length map; two reads
+and metadata must match before an immutable output-only snapshot is saved.
+Source editing/download limits and standard command deadlines remain unchanged.
+The long-output reader alone permits bounded 600-second captures with a
+1500-second overall read deadline. Previously verified output snapshots can
+be revalidated locally and bound via the exact completed-output journal hash;
+they remain explicitly retained evidence, not fresh host reads. Changed-source
+offline qualification passed: all 245 tests, zero failures/errors/skips and
+all protocol/review/rehearsal gates. Report:
+builds/build-20261017T165242Z-5b91ea48/build-report.json. Archive SHA256
+f57f55e57e88c906bc139b767ae02b6fb4602b651e2c1538803b017a8cae8cad.
+The operator's full approval covers this fixture continuation and explicit new
+output-reader provisioning. Final live audit is now active in session79976,
+evidence zvm-fixture-output-qualified-evidence.json, contract
+9ad185a569d211cdfb1af36affba93ff73d47158aacf2e977e07a1e3cb4fdf19.
+It pins completed-output journal SHA256
+2861abdf4e55065b3316d8e9c3b784e2c378e3a562b1276c385aa5fddb16ae91.
+Do not open another terminal or edit bound implementation files while active.
+MODULE/final audit remain unqualified until their successful journal results.
+New output-only helper ZME09C7C EXEC A was created absent and source-verified
+by round-trip download. Retain it; never overwrite or erase it in a continuation.
+Any later audit must explicitly --output-reader ZME09C7C and reverify its source,
+without --create-output-reader. Native MODULE capture is currently active.
+The audit allows a 900-second total download budget while preserving 300-second
+individual captures and standard MCP limits/defaults. It never calls BUILD,
+TEST, source transfer, restoration, erasure or cleanup. Offline validation of
+these new changes passed 47 targeted tests and the full isolated build. This
+progress prose was updated after the bundle; no implementation changed. All
+older active-process prose below is historical.
 
 Post-build artifact checkpoint: native ASSEMBLE verification passed (47 F80
 records / 3760 bytes; cb0fd2b0eeee7dc26df726bb12a60e9dd44a2c90bf9f3509904e250183853df9)
@@ -362,33 +487,22 @@ retained ZV scratch files are disposable qualification targets.
 | Recover established C compiler recipe | Complete for source inspection | CMS-C-RECIPE.md, Markdown and wrapper blob identities |
 | Bind native before/backup/after/restore evidence | Offline pass | 13 targeted tests; full 190-test isolated build |
 | Define disposable transaction | Fixed standalone contract implemented | ZTQUAL C A1 / ZTQBACK C A1; installed source pins and declared side effects; broad CMS authority recorded |
-| Implement narrowly gated host transaction | Offline tests pass; live pending | Default-off standalone capability; exact contract binding; durable failure evidence; standard MCP unchanged |
-| Qualify replacement and separate recovery | Pending | Explicit live authority, operator writer exclusion; disposable fixture evidence |
-| Complete one live compile/test cycle | Pending | Native readback, complete correlated output and actual RCs; declared outputs and fresh final Ready |
-| Publish qualified version 1 checkpoint | Pending | Sanitized source, documentation, exact-revision CI and evidence references |
+| Implement narrowly gated host transaction | Pass for the fixed fixture | Default-off standalone capability; pinned contracts; durable failure evidence; standard MCP unchanged |
+| Qualify replacement and separate recovery | Pass for disposable ZTQUAL only | Original native recovery/reapply receipts; production writer exclusion remains false |
+| Complete one live compile/test cycle | Pass | RC0 build/test; all four native outputs; final source/backup, transient, inventory and FILEDEF checks |
+| Publish qualified version 1 checkpoint | Pass | Implementation f0a38d2 and CI39052151534/39052154783 passed; final native qualification documented here |
 
 ## Resume here
 
-1. Read AGENTS.md, the active checkpoint at the top of this file,
-   CMS-C-RECIPE.md and PIPELINE-READINESS.md. The latest explicit full CMS
-   read/write and terminal input authority supersedes the earlier narrow
-   one-Clear diagnostic approval. Preserve production and retained helpers.
-2. Inspect git status; preserve existing work. Use .venv/bin/python and the
-   pinned requirements. Run the full offline build after implementation.
-3. Offline comparison prerequisite is complete. Revalidate only after changes;
-   retained build reports above describe the actual executed checks. Do not
-   reuse synthetic evidence as live proof.
-4. Check the latest full-build report and source contract. Once all offline
-   gates pass, invoke validate_zvm_fixture.py with --live --qualify-recovery,
-   its exact --contract-sha256, local credential path and a new exclusive
-   evidence filename. No further repeat access approval is needed for this
-   authorized fixture. Never rerun a partial transaction blindly: examine the
-   persisted last step and freshly inspect affected native files first.
-5. Verify complete native build/test output with RCs, output snapshots, final
-   source/backup hashes, transient absence and FILEDEF state. Preserve all
-   created files; no cleanup or production replacement is part of this run.
-6. Production writer exclusion is unresolved and must remain false. The fixed
-   disposable qualification cannot be generalized into production safety.
-
-Do not mark version 1 complete until the live cycle and its failure/recovery
-qualification actually pass. Keep this checkpoint current when stopping.
+1. Read the qualified checkpoint above and preserve all retained fixtures,
+   native snapshots, journals and helpers. The development cycle has passed;
+   no host command or reconnect is needed to resume local review.
+2. Inspect Git status and canonical GitHub checkpoint/CI before further edits.
+   Use .venv/bin/python; rerun offline qualification after implementation changes.
+3. Do not rerun validate_zvm_fixture.py --live against this existing namespace.
+   Do not create another output helper merely to reread retained evidence.
+   Any specifically requested read-only re-audit must reverify ZME09C7C with
+   --output-reader ZME09C7C, bind exact prior journal hashes and use new evidence.
+4. Production work requires its separate project handoff, exact targets,
+   recipe/output inventory, native rollback and operator-established writer
+   exclusion. The fixture pass supplies none of that production authority.

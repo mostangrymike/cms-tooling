@@ -22,15 +22,15 @@ SOURCE_FILES = (
     "AGENTS.md", ".gitignore", "README.md", "MIGRATION.md", "README-zvm-mcp.md", "VALIDATION-zvm-mcp.md", "PIPELINE-READINESS.md",
     "V1-PROGRESS.md", "CMS-C-RECIPE.md",
     "requirements-zvm-mcp.txt", "ZMCPRUN.EXEC", "ZMCPGET.EXEC", "ZMCPQUAL.EXEC",
-    "zvm_mcp.py", "zvm_capture.py", "zvm_commands.py", "zvm_credentials.py",
+    "zvm_mcp.py", "zvm_capture.py", "zvm_commands.py", "zvm_credentials.py", "zvm_fixture_output.py", "ZMCPOUT.EXEC",
     "zvm_download.py", "zvm_edit.py", "zvm_upload.py", "zvm_link_query.py", "zvm_operations.py", "zvm_rehearsal.py", "zvm_native_review.py",
-    "diagnose_zvm_cms.py", "verify_codex_zvm.py", "build_zvm_tooling.py", "validate_zvm_compiler.py", "validate_zvm_fixture.py",
+    "diagnose_zvm_cms.py", "verify_codex_zvm.py", "build_zvm_tooling.py", "validate_zvm_compiler.py", "validate_zvm_fixture.py", "validate_zvm_fixture_audit.py",
     "fixtures/README.md", "fixtures/terminal-screens.json",
     "fixtures/qualification/baseline/ZTQUAL.C", "fixtures/qualification/candidate/ZTQUAL.C",
     "ci/zvm-tooling.yml",
 ) + tuple(f"validate_zvm_{name}.py" for name in ("mcp", "login", "commands", "download", "edit", "upload", "operations", "rehearsal", "gdisk")) + tuple(
     f"test_zvm_{name}.py" for name in
-    ("mcp", "login", "startup", "capture", "commands", "download", "edit", "upload", "link_query", "fixtures", "operations", "rehearsal", "native_review", "compiler", "fixture")
+    ("mcp", "login", "startup", "capture", "commands", "download", "edit", "upload", "link_query", "fixtures", "operations", "rehearsal", "native_review", "compiler", "fixture", "fixture_audit", "fixture_output")
 )
 
 UNIT_CHECK = """

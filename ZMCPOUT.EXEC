@@ -1,0 +1,90 @@
+/* REXX: exact retained ZTQUAL MODULE reader; no source writes. */
+numeric digits 20
+parse upper arg token cmd
+if length(token) <> 16 then exit 12
+if verify(token,'0123456789ABCDEF') <> 0 then exit 12
+seq=0
+parse var cmd verb fn ft fm extra
+ok=(verb='FILEMETA' | verb='FILEREAD') & words(cmd)=4
+ok=ok & fn='ZTQUAL' & ft='MODULE' & fm='A1'
+if ok=0 then exit 12
+out.0=0
+if verb='FILEMETA' then do
+ 'PIPE CMS LISTFILE' fn ft fm '(LABEL | TAKE 4097 | STEM out.'
+ cmdrc=rc
+end
+else do
+ 'PIPE <' fn ft fm '| TAKE 4 | STEM out.'
+ cmdrc=rc
+ if cmdrc<>0 | out.0<>3 then do
+  call emit 'F','LIMIT'
+  exit 12
+ end
+ layout='ZMO1 3'
+ payload=''
+ longest=0
+ do i=1 to out.0
+  n=length(out.i)
+  if n>52312 then do
+   call emit 'F','LIMIT'
+   exit 12
+  end
+  longest=max(longest,n)
+  layout=layout n
+  payload=payload||out.i
+ end
+ if longest<>52312 then do
+  call emit 'F','LIMIT'
+  exit 12
+ end
+ drop out.
+ out.0=1
+ out.1=layout
+ do i=1 to length(payload) by 4096
+  out.0=out.0+1
+  n=out.0
+  out.n=substr(payload,i,min(4096,length(payload)-i+1))
+ end
+end
+if out.0>4096 then do
+ call emit 'F','LIMIT'
+ exit 12
+end
+total=0
+a=1
+b=0
+do i=1 to out.0
+ if length(out.i)>4096 then do
+  call emit 'F','LIMIT'
+  exit 12
+ end
+ total=total+length(out.i)
+ if total>1048576 then do
+  call emit 'F','LIMIT'
+  exit 12
+ end
+ do j=1 to length(out.i)
+  a=(a+c2d(substr(out.i,j,1)))//65521
+  b=(b+a)//65521
+ end
+end
+sum=b*65536+a
+call emit 'B',cmdrc out.0 total sum
+do i=1 to out.0
+ call emit 'R',i length(out.i)
+ do j=1 to length(out.i) by 24
+  call emit 'D',c2x(substr(out.i,j,min(24,length(out.i)-j+1)))
+ end
+end
+call emit 'Z','DONE'
+exit 0
+emit: procedure expose token seq
+ parse arg kind,body
+ say 'ZM1' token kind seq body
+ parse pull ack
+ if strip(ack) <> 'ZA1' token seq then do
+  say 'ZM1' token 'F' seq 'ACK'
+  exit 12
+ end
+ seq=seq+1
+ return
