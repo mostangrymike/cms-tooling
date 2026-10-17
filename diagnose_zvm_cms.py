@@ -12,7 +12,14 @@ def probe_boundary(result):
     screen = result.get("screen", {})
     fields = [f for f in screen.get("fields", []) if not f["protected"]]
     rows = screen.get("rows", [])
-    return bool(result.get("actions") in (["BEGIN", "Enter", "Enter"], ["BEGIN", "Enter", "Enter", "Enter"])
+    # A recovered CMS reconnect can print its bare CMS prompt immediately
+    # after BEGIN, with no additional blank startup Enter. Accept that exact
+    # observed banner/prompt shape only; arbitrary RUNNING screens stay refused.
+    bare_reconnect = (result.get('actions') == ['BEGIN', 'Enter'] and len(rows) == 24
+        and rows[6].strip() == 'BEGIN' and rows[8].strip() == 'CMS'
+        and all(not row.strip() for i, row in enumerate(rows[7:22], 7) if i != 8)
+        and 'Z/VM VERSION 6 RELEASE 3.0' in '\n'.join(rows).upper())
+    return bool((bare_reconnect or result.get("actions") in (["BEGIN", "Enter", "Enter"], ["BEGIN", "Enter", "Enter", "Enter"]))
                 and result.get("outcome") == "startup_transition_timeout"
                 and screen.get("connected") and screen.get("keyboard") == "U"
                 and screen.get("field_layout_error") is None

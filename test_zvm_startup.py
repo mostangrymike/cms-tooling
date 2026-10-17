@@ -89,6 +89,42 @@ class StartupTests(unittest.TestCase):
         self.assertFalse(result["ok"])
         self.assertNotIn("Enter", fake.calls)
 
+    def test_hold_arriving_during_field_recheck_stops_without_any_aid(self):
+        for indicator in ('MORE...', 'HOLDING'):
+            s, fake = self.session()
+            original = fake.exec_command
+            def transition(action):
+                if action == b'MoveCursor(22,0)':
+                    fake.rows[-1] = (' ' * 60 + indicator).ljust(80)
+                return original(action)
+            fake.exec_command = transition
+            result = s.startup(verify_cms=True)
+            self.assertFalse(result['ok'], result)
+            self.assertEqual(result['outcome'], 'startup_page_hold_observed')
+            self.assertEqual(result['actions'], [])
+            self.assertNotIn('Enter', fake.calls)
+            self.assertNotIn('Clear', fake.calls)
+            self.assertFalse(any(call.startswith('String') for call in fake.calls))
+            s.disconnect()
+
+    def test_hold_after_reconnect_begin_is_observed_without_automatic_clear(self):
+        s, fake = self.session('cp_read')
+        fake.change = False
+        original = fake.exec_command
+        def transition(action):
+            result = original(action)
+            if action == b'Enter':
+                fake.rows[-1] = (' ' * 60 + 'MORE...').ljust(80)
+            return result
+        fake.exec_command = transition
+        result = s.startup(verify_cms=True)
+        self.assertFalse(result['ok'], result)
+        self.assertEqual(result['outcome'], 'startup_page_hold_observed')
+        self.assertEqual(result['actions'], ['BEGIN', 'Enter'])
+        self.assertEqual(fake.calls.count('Enter'), 1)
+        self.assertNotIn('Clear', fake.calls)
+        s.disconnect()
+
     def test_existing_input_refused_even_when_redacted(self):
         s, fake = self.session()
         fake.rows[22] = "DO NOT SUBMIT".ljust(80)
@@ -205,6 +241,25 @@ class StartupTests(unittest.TestCase):
             query.assert_not_called()
             self.assertFalse(s.startup(verify_cms=True)["ok"])
             query.assert_called_once()
+
+    def test_bare_cms_reconnect_probe_accepts_only_exact_observed_shape(self):
+        import copy
+        from diagnose_zvm_cms import probe_boundary
+        captured = recorded_screen('cms_boundary')
+        captured['actions'] = ['BEGIN', 'Enter']
+        rows = captured['screen']['rows']
+        rows[1] = 'z/VM Version 6 Release 3.0'.ljust(80)
+        rows[6] = 'BEGIN'.ljust(80)
+        rows[7:22] = [' ' * 80] * 15
+        rows[8] = 'CMS'.ljust(80)
+        self.assertTrue(probe_boundary(captured))
+        for row, text in ((6, 'SOMETHING ELSE'), (8, 'Application input'), (10, 'unrelated output')):
+            changed = copy.deepcopy(captured)
+            changed['screen']['rows'][row] = text.ljust(80)
+            self.assertFalse(probe_boundary(changed))
+        changed = copy.deepcopy(captured)
+        changed['screen']['fields'][0]['empty'] = False
+        self.assertFalse(probe_boundary(changed))
 
 
 if __name__ == "__main__":

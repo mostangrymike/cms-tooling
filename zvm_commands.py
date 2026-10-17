@@ -26,6 +26,7 @@ class RunnerBridge:
         self.source = source
         self.policy = policy
         self.bootstrap_evidence = None
+        self.max_timeout = 300
 
     @staticmethod
     def input_field(screen):
@@ -64,7 +65,13 @@ class RunnerBridge:
         return screen
 
     def _simple(self, command, deadline):
-        """Bootstrap STATE only; require correlated echo and explicit Ready RC."""
+        """Internal fixed read-only observations; require echoed command and Ready RC.
+
+        Used by helper STATE preconditions and the fixed compiler diagnostic.
+        This is not a public or general command dispatch interface.
+        """
+        from zvm_mcp import host_display
+        readonly_command(command)
         before = self._ready_boundary()
         # A repeated visible echo cannot be distinguished from this dispatch
         # before the host responds. Fail before input instead of reusing its RC.
@@ -72,6 +79,7 @@ class RunnerBridge:
             raise CaptureError("Prior matching STATE echo is still visible; fresh completion cannot be established")
         self._input(command)
         cleared_echo_page = None
+        held_pages = set()
         evidence = []
         self.bootstrap_evidence = {"command": command, "snapshots": evidence}
         while time.monotonic() < deadline:
@@ -81,16 +89,27 @@ class RunnerBridge:
             # Re-locate the echo on EVERY snapshot. Remembering a boolean across
             # scans can select an older Ready ABOVE a newly echoed command.
             start = max(positions) + 1 if positions else None
-            if start is None and cleared_echo_page is not None and snap["rows"] != cleared_echo_page:
+            console = host_display(snap)[:22 * 80]
+            if start is None and cleared_echo_page is not None and console != cleared_echo_page:
                 start = 0
-            if start is not None:
-                for row in snap["rows"][start:22]:
-                    if ready_rc(row) is not None:
-                        self.bootstrap_evidence["rc"] = ready_rc(row)
-                        return {"rc": ready_rc(row), "snapshots": evidence}
+            if start is not None and snap['state'] == 'cms_ready' and self.input_field(snap):
+                visible = [i for i in range(start, 22) if snap['rows'][i].strip()]
+                if visible and ready_rc(snap['rows'][visible[-1]]) is not None:
+                    rc = ready_rc(snap['rows'][visible[-1]])
+                    self.bootstrap_evidence["rc"] = rc
+                    return {"rc": rc, "snapshots": evidence}
             if snap["state"] in {"more", "holding"}:
+                if not positions and cleared_echo_page is None:
+                    raise CaptureError('Paging appeared before the bootstrap command echo')
+                page = console
+                if page in held_pages:
+                    self.session._wait_output(1)
+                    continue
+                if len(held_pages) >= 64:
+                    raise CaptureError('Bootstrap observation exceeded the 64-page capture limit')
+                held_pages.add(page)
                 if positions:
-                    cleared_echo_page = snap["rows"]
+                    cleared_echo_page = console
                 self.session.command("Clear")
             else:
                 self.session._wait_output(1)
@@ -173,8 +192,9 @@ class RunnerBridge:
         s = self.session
         try:
             command = self.policy(command)
-            if type(timeout) is not int or not 1 <= timeout <= 300:
-                raise ValueError("Command timeout must be 1..300 seconds")
+            if (type(self.max_timeout) is not int or self.max_timeout not in (300, 600)
+                    or type(timeout) is not int or not 1 <= timeout <= self.max_timeout):
+                raise ValueError("Command timeout exceeds the configured standard/audit deadline")
         except ValueError as exc:
             return {"ok": False, "message": str(exc)}
         if not s.allow_commands or not self.verified:
