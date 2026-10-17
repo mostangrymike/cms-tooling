@@ -17,6 +17,7 @@ from zvm_edit import canonical, read_file, sha, validate_manifest
 ROOT = Path(__file__).resolve().parent
 TARGET = 'ZTQUAL C A1'
 BACKUP = 'ZTQBACK C A1'
+REUSABLE_HELPER = 'ZM000175'
 OUTPUTS = tuple('ZTQUAL ' + ft + ' A1' for ft in ('ASSEMBLE', 'TEXT', 'LISTING', 'MODULE'))
 TRANSIENT = ('ZTQUAL WORK A1', 'ZTQUAL SYSUT1 A4', 'ZTQUAL SYSUT2 A4',
              'ZTQUAL SYSUT3 A4', 'ZTQUAL LOADMAP A5', 'LOAD MAP A5')
@@ -52,6 +53,7 @@ def contract():
     baseline, candidate = (native_source(read_file(ROOT / f'fixtures/qualification/{role}/ZTQUAL.C', 8192))
                            for role in ('baseline', 'candidate'))
     return {'schema': 'zvm-disposable-fixture-contract-v1', 'target': TARGET, 'backup': BACKUP,
+        'reusable_fixed_helper': REUSABLE_HELPER,
         'source_hashes': sources, 'baseline_sha256': sha(baseline), 'candidate_sha256': sha(candidate),
         'installed_source_hashes': PINS, 'persistent_outputs': list(OUTPUTS),
         'required_absent_command_shadows': list(SHADOWS),
@@ -131,11 +133,12 @@ class Journal:
 
 
 class LiveAdapter:
-    def __init__(self, session, journal):
+    def __init__(self, session, journal, reuse_helper=False):
         from zvm_commands import RunnerBridge
         self.s = session
         self.j = journal
-        self.builder = RunnerBridge(session, source=ROOT / 'ZMCPQUAL.EXEC', policy=action_policy)
+        self.builder = RunnerBridge(session, name=REUSABLE_HELPER if reuse_helper else None,
+                                    source=ROOT / 'ZMCPQUAL.EXEC', policy=action_policy)
         self.review_data = None
 
     def command(self, text, rc=0, marker=None):
@@ -244,7 +247,8 @@ def execute(adapter, journal, declared, expected_contract, qualify_recovery):
     def empty_filedefs():
         result = adapter.action('FILEDEFS')
         records = [line.strip().upper() for line in result['records'] if line.strip()]
-        if records and records != ['NO FILE DEFINITIONS IN EFFECT']:
+        if records and records not in (['NO FILE DEFINITIONS IN EFFECT'],
+                                       ['DMSFLD324I NO USER DEFINED FILEDEFS IN EFFECT']):
             raise ValueError('Existing or unrecognized FILEDEF state; no source write')
         return result
     step('empty FILEDEF before', empty_filedefs)
@@ -319,6 +323,8 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--live', action='store_true')
     parser.add_argument('--qualify-recovery', action='store_true')
+    parser.add_argument('--reuse-fixture-helper', action='store_true',
+                        help='Reverify retained fixed helper ZM000175 instead of creating a new one')
     parser.add_argument('--contract-sha256')
     parser.add_argument('--credential-file', type=Path)
     parser.add_argument('--output', type=Path)
@@ -337,7 +343,7 @@ def main():
         runner_name='ZM537EF1', allow_downloads=True, download_root=ROOT / 'cms-sources',
         download_runner_name='ZM02EA0B', allow_local_edits=True,
         credential_provider=FileCredentialProvider(args.credential_file))
-    adapter = LiveAdapter(session, journal)
+    adapter = LiveAdapter(session, journal, args.reuse_fixture_helper)
     try:
         connected = journal.step('connect', lambda: require(session.connect()))
         screen = connected['screen']
@@ -345,7 +351,8 @@ def main():
             journal.step('login', lambda: require(session.login()))
         journal.step('startup', lambda: require(session.startup(timeout=45, verify_cms=True)))
         journal.step('verify existing read-only helper', lambda: require(session.runner.prepare(create=False)))
-        journal.step('create and verify fixed fixture helper', lambda: require(adapter.builder.prepare(create=True)))
+        journal.step('verify fixed fixture helper' if args.reuse_fixture_helper else 'create and verify fixed fixture helper',
+                     lambda: require(adapter.builder.prepare(create=not args.reuse_fixture_helper)))
         execute(adapter, journal, declared, digest, args.qualify_recovery)
     except BaseException as exc:
         journal.data.update(passed=False, error_type=type(exc).__name__,

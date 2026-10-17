@@ -4,6 +4,53 @@ Updated: 2026-10-17. Repository: mostangrymike/zvm-tooling.
 
 ## Active continuation: compiler inventory audit
 
+Second live attempt stopped safely at FILEDEF precheck, before baseline/backup
+creation. All three installed native source pins matched. Actual complete
+FILEDEF result was RC0 and exactly `DMSFLD324I No user defined FILEDEFs in effect`.
+The guard expected different wording and refused; updated to allow this exact
+verified empty-state record only. No source/backup, compile, restore or cleanup
+occurred. ZM000175 EXEC A was created and retained source-verified, and the
+session disconnected cleanly. New --reuse-fixture-helper re-verifies only this
+fixed retained helper instead of creating another; no arbitrary helper name.
+New tests cover this message, reuse, real partial-transfer fail-stop, metadata
+change before replacement and existing-backup refusal. Full offline validation
+must pass before a third run with a new evidence filename. Do not overwrite
+zvm-fixture-probe-live-evidence.json or its helper.
+
+Remote checkpoint validation: draft PR
+https://github.com/mostangrymike/zvm-tooling/pull/1 at remote commit
+7ce6948066c59022a612eb26ca550a2a9252f27c. GitHub Actions run 39047453523
+completed with conclusion=success (observed through the connector), URL:
+https://github.com/mostangrymike/zvm-tooling/actions/runs/39047453523.
+This is real remote CI for that source checkpoint, not live CMS qualification.
+During the active second live run, CMSCLNK native hash revalidation passed;
+GCCE native readback is currently in progress. Journal remains the authoritative
+step-by-step state if this prose is older than the active process.
+
+Live continuation (second attempt): guarded CMSLEVEL probe reached fresh Ready;
+existing ZM537EF1 command helper was source-verified. Created and source-verified
+new fixed-action helper ZM000175 EXEC A (BUILD/TEST/FILEDEFS only). Retain it;
+do not overwrite/erase or assume its session verification persists after a
+disconnect. It is separate from all older command/download/scratch helpers.
+Fresh disk identity, all declared command-shadow absences and GCC/ASSEMBLE
+binary presence checks passed. Re-downloading/pinning installed compiler sources
+is in progress in exec session45033, evidence zvm-fixture-probe-live-evidence.json.
+No fixture source or backup created yet. Never start another terminal while
+this workflow owns its dedicated process.
+
+Latest checkpoint: reconnect/probe and failed-result-journal fixes passed the
+full isolated build: builds/build-20261017T155611Z-6c0bd98f/build-report.json,
+218 tests, no failures/errors/skips, all protocol/review/rehearsal checks pass.
+Bundle SHA256 4eb06298f7e80c2a992a2e75476ee85fdefa09ee36a6f2d0394902dfe78b226d.
+Current live contract bc559b9bfccf4d7c3682c7ee81cb5906851bfa9621ffe5287e950b6c23e98436.
+Second attempt evidence will be zvm-fixture-probe-live-evidence.json.
+Local commits 00b7c4d and 38b596c are saved. Via the GitHub connector, identical
+source tree ba2735ff4af03d848d2a083ac482806d569ce2ce was saved at remote commit
+7ce6948066c59022a612eb26ca550a2a9252f27c on
+https://github.com/mostangrymike/zvm-tooling/tree/codex/disposable-c-qualification.
+Remote and local commit IDs differ because the connector creates commits;
+their source tree identity was checked. No merge into main or production write.
+
 Live attempt zvm-fixture-live-evidence.json stopped at reconnect startup before
 helper/source creation. Login reached CP READ; BEGIN printed bare CMS at row9
 with an empty verified field but no Ready. No source writes, builds or helper
