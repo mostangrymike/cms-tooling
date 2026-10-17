@@ -141,6 +141,25 @@ class FixtureTests(unittest.TestCase):
         self.assertFalse(any(call.startswith('put ') for call in adapter.calls))
         self.assertFalse(journal.data['passed'])
 
+    def test_exact_observed_empty_filedefs_message_is_accepted(self):
+        adapter, journal = FakeAdapter(self.folder), self.journal()
+        original = adapter.action
+        def action(name, marker=None):
+            if name == 'FILEDEFS':
+                adapter.event(name)
+                return completed(['DMSFLD324I No user defined FILEDEFs in effect'])
+            return original(name, marker)
+        adapter.action = action
+        with patch('builtins.print'):
+            fixture.execute(adapter, journal, self.declared, self.digest, True)
+        self.assertTrue(journal.data['passed'])
+
+    def test_reusable_helper_is_fixed_and_source_verified_by_prepare(self):
+        adapter = fixture.LiveAdapter(Mock(), self.journal(), reuse_helper=True)
+        self.assertEqual(adapter.builder.name, 'ZM000175')
+        self.assertFalse(adapter.builder.verified)
+        self.assertEqual(adapter.builder.source, fixture.ROOT / 'ZMCPQUAL.EXEC')
+
     def test_partial_output_bad_rc_redaction_and_wrong_marker_are_rejected(self):
         for change in ({'cms_rc': 12}, {'ok': False}, {'integrity_verified': False},
                        {'output_complete': False}, {'cms_command_complete': False}, {'redaction_applied': True}):
@@ -196,6 +215,36 @@ class FixtureTests(unittest.TestCase):
             adapter.put(fixture.TARGET, raw, '0' * 64)
         session._run.assert_not_called()
         session.runner._transfer.assert_not_called()
+
+    def test_partial_transfer_failure_has_no_readback_retry_or_restore(self):
+        session = Mock()
+        session._run.return_value = {'ok': False, 'message': 'Uncertain transfer'}
+        adapter = fixture.LiveAdapter(session, self.journal())
+        adapter.command = Mock(return_value=completed(rc=28))
+        adapter.download = Mock()
+        with self.assertRaises(fixture.StepFailure):
+            adapter.put(fixture.TARGET, b'\x40' * 80)
+        session._run.assert_called_once()
+        adapter.command.assert_called_once_with('STATE ' + fixture.TARGET, rc=28)
+        adapter.download.assert_not_called()
+
+    def test_first_replacement_rejects_metadata_change_before_transfer(self):
+        session = Mock()
+        adapter = fixture.LiveAdapter(session, self.journal())
+        adapter.revalidate_review = Mock()
+        adapter.review_data = {'replaced_once': False, 'original_cms': {'timestamp': 'before'}}
+        adapter.download = Mock(return_value={'cms': {'timestamp': 'changed'}})
+        with self.assertRaises(ValueError):
+            adapter.put(fixture.TARGET, b'\x40' * 80, '0' * 64)
+        session._run.assert_not_called()
+
+    def test_existing_backup_refused_before_transfer(self):
+        session = Mock()
+        session.runner.run.return_value = completed(rc=0)
+        adapter = fixture.LiveAdapter(session, self.journal())
+        with self.assertRaises(ValueError):
+            adapter.put(fixture.BACKUP, b'\x40' * 80)
+        session._run.assert_not_called()
 
     def test_native_source_rejects_crlf_controls_width_and_nonascii(self):
         for payload in (b'int x;\r\n', b'int x;', b'x' * 81 + b'\n', b'\tint x;\n', b'\xff\n'):
