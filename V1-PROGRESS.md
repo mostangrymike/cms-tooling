@@ -4,6 +4,66 @@ Updated: 2026-10-17. Repository: mostangrymike/zvm-tooling.
 
 ## Active continuation: compiler inventory audit
 
+Post-build artifact checkpoint: native ASSEMBLE verification passed (47 F80
+records / 3760 bytes; cb0fd2b0eeee7dc26df726bb12a60e9dd44a2c90bf9f3509904e250183853df9)
+and native binary TEXT verification passed (10 F80 records / 800 bytes;
+06b33b399c592ba799d1493623dc9d1a583530a99732ec5b6a537afeda6d46ab).
+LISTING native verification is active in session66836. Do not claim MODULE,
+LISTING, final inventory or whole-run pass before their journal results exist.
+Source recovery/build/test have passed and must not be repeated just to obtain
+later read-only evidence. Current implementation is saved on GitHub at
+a11645bae0c84d076ecdbe6d13c7e978b1809a2c, PR1; CI223 passed. Local progress
+updates after that source checkpoint are being retained separately.
+
+Core live cycle passed: explicit source recovery matched the baseline native
+bytes, then candidate reapply matched its exact native hash. All declared
+outputs/transients were absent immediately before the one build. CMSCLNK build
+returned actual CMS-stage RC0 with the expected built marker. ZTQUAL execution
+returned actual RC0 and complete verified native output `ZTQUAL CANDIDATE PASS 43`.
+The run is NOT yet marked passed: native ASSEMBLE/TEXT/LISTING/MODULE output
+snapshots and final source/backup/transient/inventory/FILEDEF checks remain.
+Current active step is native output ZTQUAL ASSEMBLE A1 in session66836.
+Retain generated artifacts and the native baseline backup. Never rerun build
+or create to collect evidence; use the journal's completed build/test results.
+
+Live write/recovery checkpoint: baseline creation/readback, local pinned edit
+review, new ZTQBACK C A1 native backup and candidate replacement/readback all
+passed. Fresh backup native verification also passed. Explicit successful-path
+source recovery is now running, followed by candidate reapply and one build.
+ZTQUAL C A1 and ZTQBACK C A1 now exist; they are retained qualification files.
+Do not rerun the create workflow, erase either file, or infer their current
+content from this prose; the journal records each native hash and later step.
+Canonical baseline native hash61b02abb63e32204ceff16c0ac61a8729f45a5a1942fc0d4f94bb774b73f8003;
+candidate41586cfd4d6c5b5c62d5f4550636b0c7e7bb6699121ef812c7b5ea7167eb6ae2.
+
+Current live boundary: third run passed all source pins, namespace absence,
+global-map absence and exact empty user-FILEDEF check. Step55 `create baseline
+and native readback` has started. ZTQUAL C A1 MAY NOW EXIST (including partial
+state until the journal confirms native readback); never rerun create blindly.
+Process exec session66836 remains active and owns the only dedicated terminal.
+Inspect zvm-fixture-qualified-live-evidence.json for the newer authoritative
+result; all journal writes are flushed/fsynced before/after each step.
+
+Remote CI run39047781434 completed successfully for a11645bae0c84d076ecdbe6d13c7e978b1809a2c.
+Third live attempt is active in exec session66836 (one dedicated s3270).
+Startup CMSLEVEL verification and re-verification of ZM537EF1/ZM000175 passed;
+fresh compiler preconditions are running. The authoritative current state is
+zvm-fixture-qualified-live-evidence.json. Do not start a second terminal or
+modify bound implementation files while it is running. Progress documentation
+can be updated independently; source contract validation runs before every step.
+
+Third attempt starting after successful full isolated validation:
+builds/build-20261017T160307Z-3181285a/build-report.json, 223 tests, zero
+failures/errors/skips, all protocol/review/rehearsal gates passed. Bundle SHA256
+85e6923a7fbec0096bdabe12d750d19bee856c0aca2c29ebcf662b7927c4e40f.
+Exact contract 177b1481ad1571b3a407cccee70b0974178e5bfe87e3d803f349b7dca43c088f.
+New evidence zvm-fixture-qualified-live-evidence.json; --reuse-fixture-helper
+re-verifies ZM000175 instead of creating another helper. Local commit87c6799
+matches remote commit a11645bae0c84d076ecdbe6d13c7e978b1809a2c by source tree
+0a05e693fcca5db68280aacfbc7f227e9bae5095. Remote CI run39047781434 is in progress.
+Do not run this again if a source/backup/partial output now exists; inspect the
+persisted journal and exact affected native files before any continuation.
+
 Second live attempt stopped safely at FILEDEF precheck, before baseline/backup
 creation. All three installed native source pins matched. Actual complete
 FILEDEF result was RC0 and exactly `DMSFLD324I No user defined FILEDEFs in effect`.
