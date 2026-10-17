@@ -39,3 +39,19 @@ fixed build/test/FILEDEF actions. Existing helpers and scratches are preserved.
 Every step is checkpointed; a failure stops without retry, restore or cleanup.
 Success qualifies that fixture only; production writer exclusion and deployment
 remain unresolved. See V1-PROGRESS.md for actual validation state.
+
+`validate_zvm_fixture_audit.py` provides a separate read-only continuation for
+the retained run that stopped during LISTING capture after successful build/test.
+It pins the old journal hash and a new source contract, verifies all output/source/
+backup snapshots, transient absence, exact inventories and FILEDEF state, and
+never repeats creation, replacement, compilation or execution. Its optional
+`--recover-failed-reader` requires separate operator approval for one Clear and
+one fixed QUERY CMSLEVEL probe at the exact failed-reader/Ready(00012) boundary.
+For the observed three-record V52312 MODULE, `--create-output-reader` explicitly
+provisions one new source-verified output-only helper. It transports bounded
+chunks plus the original native record lengths; standard download/edit limits
+stay unchanged. `--completed-output-evidence` and its exact SHA-256 may retain
+already verified ASSEMBLE/TEXT/LISTING snapshots after revalidating their local
+bytes/manifests; these are identified as retained evidence, not fresh host reads.
+Neither provisioning nor an audit authorizes fixture source changes or builds.
+No recovery or audit success is claimed merely because the implementation exists.

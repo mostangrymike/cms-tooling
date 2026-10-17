@@ -26,6 +26,7 @@ class RunnerBridge:
         self.source = source
         self.policy = policy
         self.bootstrap_evidence = None
+        self.max_timeout = 300
 
     @staticmethod
     def input_field(screen):
@@ -191,8 +192,9 @@ class RunnerBridge:
         s = self.session
         try:
             command = self.policy(command)
-            if type(timeout) is not int or not 1 <= timeout <= 300:
-                raise ValueError("Command timeout must be 1..300 seconds")
+            if (type(self.max_timeout) is not int or self.max_timeout not in (300, 600)
+                    or type(timeout) is not int or not 1 <= timeout <= self.max_timeout):
+                raise ValueError("Command timeout exceeds the configured standard/audit deadline")
         except ValueError as exc:
             return {"ok": False, "message": str(exc)}
         if not s.allow_commands or not self.verified:

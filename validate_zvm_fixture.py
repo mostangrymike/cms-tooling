@@ -45,7 +45,8 @@ def native_source(payload):
 
 
 def contract():
-    files = ('validate_zvm_fixture.py', 'ZMCPQUAL.EXEC', 'zvm_commands.py',
+    files = ('validate_zvm_fixture.py', 'validate_zvm_fixture_audit.py', 'zvm_fixture_output.py',
+        'ZMCPOUT.EXEC', 'ZMCPQUAL.EXEC', 'zvm_commands.py',
         'zvm_capture.py', 'zvm_download.py', 'zvm_edit.py', 'zvm_native_review.py',
         'zvm_operations.py', 'zvm_rehearsal.py', 'zvm_mcp.py', 'zvm_credentials.py', 'diagnose_zvm_cms.py',
         'fixtures/qualification/baseline/ZTQUAL.C', 'fixtures/qualification/candidate/ZTQUAL.C')
@@ -140,6 +141,7 @@ class LiveAdapter:
         self.builder = RunnerBridge(session, name=REUSABLE_HELPER if reuse_helper else None,
                                     source=ROOT / 'ZMCPQUAL.EXEC', policy=action_policy)
         self.review_data = None
+        self.download_timeout = 300
 
     def command(self, text, rc=0, marker=None):
         result = self.s.runner.run(text, timeout=120)
@@ -154,7 +156,7 @@ class LiveAdapter:
         return command_ok(result, marker=marker)
 
     def download(self, target, expected=None):
-        result = self.s.downloader.download(*target.split(), timeout=300)
+        result = self.s.downloader.download(*target.split(), timeout=self.download_timeout)
         self.j.data['last_download'] = result
         self.j.persist()
         require(result)

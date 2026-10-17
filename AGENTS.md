@@ -96,6 +96,12 @@
   AidWait for transfer completion and fresh Ready/empty-field/cursor verification
   before another transfer. Do not infer readiness from transfer completion alone.
 - Any IPL, LOGOFF, or broader recovery requires separate authorization.
+- The approved retained-fixture audit created source-verified ZME09C7C EXEC A
+  for exact ZTQUAL MODULE A1 native reads only. It transports bounded chunks
+  with original record lengths for the observed three-record V52312 output.
+  Retain it; never overwrite/erase it. Reuse only with explicit --output-reader
+  ZME09C7C and fresh source verification. Standard source download/edit limits
+  and Codex registration remain unchanged; this grants no source write/build.
 - The operator next authorized verified read-only source downloads into the local
   Git working tree. Enable only with --allow-downloads and a configured
   --download-root. Keep CMS source edits and replacements disabled. Download

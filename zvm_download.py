@@ -152,6 +152,9 @@ class SourceDownloader:
         self.session = session
         self.root = root
         self.reader = RunnerBridge(session, runner_name, source=SOURCE, policy=reader_command)
+        # Standard MCP sessions retain the 300-second ceiling. The standalone
+        # retained-fixture audit may explicitly opt into a longer total budget.
+        self.max_timeout = 300
 
     def download(self, filename, filetype, filemode, create_runner=False, timeout=300):
         s = self.session
@@ -161,8 +164,10 @@ class SourceDownloader:
                 if not s.allow_downloads or not s.allow_commands or not self.root:
                     raise ValueError('Source downloads require --allow-downloads, --allow-commands and --download-root')
                 requested = file_id(filename, filetype, filemode)
-                if type(timeout) is not int or not 30 <= timeout <= 300 or type(create_runner) is not bool:
-                    raise ValueError('timeout must be 30..300 seconds and create_runner must be boolean')
+                if (type(self.max_timeout) is not int or self.max_timeout not in (300, 900)
+                        or type(timeout) is not int or not 30 <= timeout <= self.max_timeout
+                        or type(create_runner) is not bool):
+                    raise ValueError('timeout exceeds the configured 30..300 or audit-only 30..900 budget; create_runner must be boolean')
                 root, worktree = git_root_for(self.root)
                 deadline = time.monotonic() + timeout
                 if not self.reader.verified:
