@@ -1,5 +1,89 @@
 # Actual validation results
 
+## 2026-10-17 version 1 offline prerequisite checkpoint
+
+In the standalone zvm-tooling checkout, bootstrapped `.venv` with Python 3.14
+and `requirements-zvm-mcp.txt`; `pip check` passed. An initial isolated build
+passed 177 tests with no skips. After implementing `zvm_native_review.py`,
+adding 13 regression tests and the two local C89 qualification sources, the
+complete isolated distribution build passed 190 tests with zero failures,
+errors or skips. Real disconnected MCP stdio checks for default/auto selectors,
+disabled upload, edit review, operation review and the twenty-scenario
+symbolic rehearsal all passed.
+
+Build report: `builds/build-20261017T144918Z-f2800486/build-report.json`.
+The 53-file source archive SHA-256 is
+`d05e2a7a09d8ded15491e94ff89d1288ad565fbc5ee8e660d19b912ba0859979`.
+Progress/validation documentation and fixture README formatting were updated
+after building; the implementation and test sources did not change afterward.
+
+Both local ZTQUAL fixtures compiled under host `cc -x c -std=c89
+-pedantic-errors -Wall -Wextra -Werror` and returned actual RC0 with exact
+distinct baseline/candidate markers. Both preserve cp037 F80 encoding and fit
+within 48 source columns. These checks do not qualify GCCCMS.
+
+The native comparison revalidates the exact operation and snapshot hashes,
+file identity, record layout, format and native bytes. Baseline metadata must
+be unchanged; backup must name a distinct unprotected A1 file outside recipe
+inputs/outputs. All host-safety/execution blockers remain. Local snapshots can
+be synthetic or old; successful comparison never attests host provenance or
+freshness. No host adapter or new MCP capability was introduced.
+
+Inspected canonical ibm-sandbox Markdown and CMSCLNK source for the existing
+PLAIN compiler sequence; source identities and remaining side-effect/output
+inventory gates are recorded in CMS-C-RECIPE.md. No guest connection, CMS input,
+transfer, replacement, build or cleanup occurred. No Codex discovery, GitHub
+push or remote CI was performed. Work remains local/uncommitted. See
+V1-PROGRESS.md for the finish line and exact restart steps.
+
+## Historical validation log
+
+### 2026-10-17 compiler-audit continuation and fail-stop diagnostics
+
+Before connecting, the fresh isolated build passed 190 tests plus real stdio
+protocol validation. One MCP read-only session reached CMS Ready and verified
+the existing helper's STATE RC0. Its source-verification receive did not start
+within 30 seconds. The retained sanitized failure screen shows MORE; that does
+not establish the root cause. The server terminated the dedicated process.
+No helper was created/executed, no source snapshot completed and no compiler,
+upload or cleanup ran. Evidence: zvm-compiler-audit-attempt-evidence.json.
+
+Added a standalone thirteen-query compiler availability diagnostic using only
+QUERY DISK and exact STATE file IDs. It requires no helper EXEC or transfer,
+records correlated terminal Ready RCs and full sanitized snapshots, and makes
+no native-integrity or source-verification claim. Evidence reservation is
+exclusive and owner-only. Default capability flags and MCP tool catalog are
+unchanged. Hardened the shared internal read-only observer to capture before
+paging, avoid repeated Clear on unchanged held console content, and require a
+final fresh Ready boundary below output instead of accepting an incomplete page.
+
+After 197 tests and protocol checks passed, the default diagnostic was attempted.
+The sandbox refused localhost before connection/input; the approved unsandboxed
+run connected, logged in once and resumed CP READ with the authorized BEGIN.
+MORE appeared during startup field recheck, so it stopped without issuing any
+availability query, extra Enter or Clear. The process terminated. Evidence:
+zvm-compiler-availability-evidence.json and
+zvm-compiler-availability-live-evidence.json. No DFT retry occurred.
+
+Startup now explicitly returns startup_page_hold_observed for held output,
+preserving the screen/actions and sending no automatic paging input. The local
+diagnostic has a separately gated --advance-startup-more option. It defaults
+off, requires the exact captured reconnect BEGIN/Enter page, blank field and
+fresh geometry/cursor rechecks, and permits only one Clear followed by passive
+Ready observation. A second held page stops. This option has **not** been run;
+operator authorization is pending under AGENTS.md's separate recovery rule.
+
+Final isolated build: 204 tests, zero failures/errors/skips, both real MCP stdio
+selector configurations, disabled-upload checks, local edit/operation reviews
+and all twenty symbolic rehearsal scenarios PASS. Report:
+builds/build-20261017T150644Z-4c6971fb/build-report.json; 55-file archive SHA-256
+a7bfb9cc1ef932e953da3689928b65d5106e8f8005f8b82b1091dc0ae38ff8a5.
+Subsequent edits affect documentation and a diagnostic comment only. Syntax,
+pip check and git diff --check passed. All three live-attempt evidence files
+are owner-only and exclude the configured credential values. No GitHub push,
+remote CI or new Codex discovery is claimed. GCCE/CMSCLNK installed sources,
+complete build output inventory and version 1 live qualification remain open.
+
 Latest result (2026-10-16): z/VM tooling is organized under `src/zvm-tooling`.
 All 117 offline tests pass, Python compilation and stdio MCP validation pass,
 and Codex app-server discovers the registered fourteen tools with
