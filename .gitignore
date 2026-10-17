@@ -1,6 +1,6 @@
 # Retain machine-local legacy pipelines, which contain embedded credentials.
-/zvm_pipeline.py
-/zvm_pipeline.sh
+/[z]vm_pipeline.py
+/[z]vm_pipeline.sh
 /credentials*.json
 # Runtime captures and local source/edit workspaces are not distribution inputs.
 /cms-sources/
@@ -8,8 +8,11 @@
 /__pycache__/
 *.pyc
 /mainframe_surface.log
-/zvm-*.json
+/cms-*.json
 
 # Standalone local Python environment
 /.venv/
 /.DS_Store
+
+# Retain historical machine-local validation captures.
+/[z]vm-*.json

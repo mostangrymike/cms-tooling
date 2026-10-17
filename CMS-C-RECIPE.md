@@ -111,10 +111,10 @@ The first read-only audit reached CMS Ready on 2026-10-17, but existing-helper
 source verification failed because DFT did not start within 30 seconds. MORE
 is visible in the retained failure screen. The terminal was terminated and no
 helper or compiler was executed. See local ignored evidence
-`zvm-compiler-audit-attempt-evidence.json`. GCCE source and the installed
+`cms-compiler-audit-attempt-evidence.json`. GCCE source and the installed
 CMSCLNK source remain unverified.
 
-`validate_zvm_compiler.py` provides a fixed availability-only diagnostic for
+`validate_cms_compiler.py` provides a fixed availability-only diagnostic for
 accessed disks, IND$FILE MODULE on known search modes, and CMSCLNK/GCCE EXEC on
 A/F. It uses no transfers or unverified helper EXEC. It reports terminal Ready
 RCs and full sanitized snapshots; it does not claim native output integrity,
@@ -123,7 +123,7 @@ source equality, installed command resolution or a safe build recipe.
 The first separate availability run stopped during reconnect startup before
 issuing any of its thirteen queries: MORE appeared during field recheck after
 the authorized BEGIN/Enter. Evidence:
-`zvm-compiler-availability-live-evidence.json`. The optional
+`cms-compiler-availability-live-evidence.json`. The optional
 `--advance-startup-more` diagnostic flag requires separate operator recovery
 authority. It permits only one Clear on the exact captured reconnect hold with
 unchanged empty command field/geometry and BEGIN/Enter provenance; it sends no
@@ -133,10 +133,10 @@ stops the workflow. Normal MCP startup never clears that page automatically.
 The reviewed follow-up command, authorized and run on 2026-10-17, was:
 
 ```sh
-.venv/bin/python -B validate_zvm_compiler.py --live \
+.venv/bin/python -B validate_cms_compiler.py --live \
   --credential-file /Users/mikewommack/.config/ibm-zvm-cms/credentials.json \
   --advance-startup-more \
-  --output zvm-compiler-availability-recovery-evidence.json
+  --output cms-compiler-availability-recovery-evidence.json
 ```
 
 It then runs only the fixed QUERY DISK and literal STATE availability probes,
@@ -152,7 +152,7 @@ completed: IND$FILE MODULE S exists; CMSCLNK/GCCE EXEC F exist; A copies are
 absent. QUERY DISK identifies F as GCCLIB/29D/RW/20 cylinders. Existing ZM537EF1
 command-helper source verification passed by receive without provisioning.
 Native compiler-source inspection is in progress. Evidence:
-zvm-operator-session-evidence.json (local, owner-only).
+cms-operator-session-evidence.json (local, owner-only).
 
 Inspection subsequently completed. Installed native source SHA-256 values:
 
@@ -170,7 +170,7 @@ and GENMOD. Existing outputs must therefore be absent for this disposable run.
 The wrapper's two usage lines have different native bracket bytes from the
 repository's cp037 reconstruction; the installed source is pinned as observed.
 
-`validate_zvm_fixture.py` declares exact persistent outputs (ASSEMBLE, TEXT,
+`validate_cms_fixture.py` declares exact persistent outputs (ASSEMBLE, TEXT,
 LISTING and MODULE A1) and possible transient WORK/SYSUT1-3/map files. It checks
 absence before build and native output snapshots afterward. Initial FILEDEF
 state must be empty; preexisting definitions stop it before source writes.

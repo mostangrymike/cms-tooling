@@ -1,21 +1,12 @@
-/* REXX: v1 read-only CMS runner. No output files or cleanup. */
+/* REXX: correlated CMS command capture. No output files or cleanup. */
 numeric digits 20
-parse upper arg token cmd
+parse arg token cmd
 if length(token) <> 16 then exit 12
 if verify(token,'0123456789ABCDEF') <> 0 then exit 12
+if length(cmd) < 1 | length(cmd) > 108 then exit 12
+/* These delimiters belong to this wrapper's framing syntax. */
+if pos('|',cmd) > 0 | pos('#',cmd) > 0 then exit 12
 seq=0
-ok=(cmd='QUERY CMSLEVEL' | cmd='QUERY DISK')
-parse var cmd verb fn ft fm extra
-if (verb='STATE' | verb='LISTFILE') & words(cmd)=4 then do
- chars='ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789@$#'
- if verb='LISTFILE' then chars=chars'*%'
- ok=length(fn)>0 & length(fn)<=8 & length(ft)>0 & length(ft)<=8
- ok=ok & verify(fn,chars)=0 & verify(ft,chars)=0
- ok=ok & length(fm)>=1 & length(fm)<=2
- ok=ok & verify(left(fm,1),'ABCDEFGHIJKLMNOPQRSTUVWXYZ')=0
- if length(fm)=2 then ok=ok & verify(right(fm,1),'0123456789')=0
-end
-if ok=0 then exit 12
 out.0=0
 'PIPE CMS' cmd '| TAKE 4097 | STEM out.'
 cmdrc=rc

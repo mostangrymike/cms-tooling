@@ -1,5 +1,5 @@
 {
-  "schema": "zvm-offline-screen-fixtures-v1",
+  "schema": "cms-offline-screen-fixtures-v1",
   "hercules_banner": {
     "rows": [
       " Hercules Version  : 4.7.0.11134-Aethra-g2be74b0c                               ",
