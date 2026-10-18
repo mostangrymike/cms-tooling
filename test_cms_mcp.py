@@ -296,9 +296,10 @@ class SessionTests(unittest.TestCase):
         self.assertFalse(result["ok"])
         self.assertIn("terminal selector 0200@", result["message"])
         self.assertIn("Connection rejected", result["last_screen"]["rows"][0])
-        self.assertTrue(result["session_terminated"])
-        self.assertTrue(fake.closed)
-        self.assertIsNone(session.em)
+        self.assertTrue(result["session_preserved"])
+        self.assertFalse(result["session_terminated"])
+        self.assertFalse(fake.closed)
+        self.assertIsNotNone(session.em)
         self.assertFalse(any(action.startswith(("String", "Enter", "Clear"))
                              for action in fake.calls))
 
@@ -358,16 +359,19 @@ class SessionTests(unittest.TestCase):
         fake.rows = screen('secret"value')
         self.assertNotIn('secret\\"value', json.dumps(session.screen()))
 
-    def test_deadline_preserves_screen_and_terminates(self):
+    def test_deadline_preserves_connected_screen_and_session(self):
         session, fake = self.make_session()
         session.connect("0200@")
         fake.fail_action = "Enter"
         result = session.send("Enter")
         self.assertFalse(result["ok"])
         self.assertEqual(len(result["last_screen"]["rows"]), 24)
-        self.assertEqual(result["trace"][-1]["error_type"], "TimeoutError")
-        self.assertTrue(fake.closed)
-        self.assertIsNone(session.em)
+        self.assertEqual(result["error_type"], "TimeoutError")
+        self.assertTrue(any(item.get("error_type") == "TimeoutError" for item in result["trace"]))
+        self.assertTrue(result["session_preserved"])
+        self.assertFalse(result["session_terminated"])
+        self.assertFalse(fake.closed)
+        self.assertIsNotNone(session.em)
 
     def test_buffer_deadline_is_not_hidden(self):
         session, fake = self.make_session()

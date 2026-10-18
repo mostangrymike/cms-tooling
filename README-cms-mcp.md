@@ -59,7 +59,8 @@ guest login are separate checks. No terminal groups are created by this tooling.
 | `cms_login(timeout=30)` | One-shot local-credential login through the verified combined guest form or exact CP command menu for MAINT; separate `--allow-login` flag required. |
 | `cms_startup(timeout=30, verify_cms=False, begin_vm=False)` | Continue verified startup; `begin_vm=True` sends one lowercase `b` at the exact empty VM READ field; optional fixed read-only CMS verification. Requires `--allow-startup`. |
 | `cms_prepare_runner(create=False)` | Verify a configured helper, or explicitly create one new unique EXEC when create=true. |
-| `cms_command(command, timeout=120)` | Run one CMS command through the correlated runner and return complete native output plus the actual CMS-stage RC. Arbitrary mode has a 108-character limit and reserves `|` and `#` for framing. |
+| `cms_command(command, timeout=120)` | Run one CMS command through the correlated runner and return complete native output plus the actual CMS-stage RC. Explicit timeout may be up to 900 seconds. Arbitrary mode has a 108-character limit and reserves `|` and `#` for framing. |
+| `cms_resolve_failed_capture(token, resume_arbitrary_commands=False)` | Acknowledge only a stable `F 0 ACK` frame followed by `Ready(12)`. It sends no CMS input, marks the old result incomplete, and defaults subsequent calls to the read-only allowlist. Repeating it with `resume_arbitrary_commands=true` restores the configured command scope. |
 | `cms_query_links(vaddr, timeout=120)` | Submit only the fixed `CP QUERY LINKS` command for one three-digit virtual address through the observed CMS input field; captures pages until a fresh Ready prompt. |
 | `cms_download(filename, filetype, filemode, create_runner=False, timeout=300)` | Capture native file records twice, verify CMS metadata, and save a new snapshot in the configured local Git worktree. |
 | `cms_edit_prepare(snapshot)` | Validate a local snapshot and create a separate working copy with pinned original bytes and metadata. |
@@ -99,9 +100,13 @@ The `wait` option is `none` or `output`; `output` uses bounded
 `Wait(timeout,Output)`, armed by an ASCII read before the action. Host output is
 not proof of command completion. `aidWait=false` avoids relying on unlock for
 action synchronization. Pipe reads also have deadlines. A failed/ambiguous
-operation is not retried; the process is terminated and sanitized screen,
-operation trace, error and stderr evidence are returned. A timeout may leave only
-the last successfully captured screen available. Explicit reconnection is needed.
+operation is never retried. The server makes one bounded fresh-screen attempt to
+resynchronize; if it confirms the terminal is connected, the same s3270 session
+is kept open and the error includes the sanitized screen, trace and stderr. The
+session is terminated only if s3270 has exited or a complete connected screen
+cannot be recovered. A preserved session may still have a helper waiting for
+input or acknowledgement; use `cms_resolve_failed_capture` only when its exact
+failed-frame and Ready boundary are visible before another command.
 
 Avoid `Snap(Wait,...,Output)` with the installed s3270 4.5ga6: a live passive
 observation triggered SIGSEGV in its `snap_save` / `set_output_needed` path on
@@ -393,12 +398,15 @@ No host output files are created. On MORE/HOLDING the driver captures the curren
 frame and advances paging under protocol control; there are no timed scrolling
 loops. Captures exceeding 4096 records, 4096 bytes per record or 1 MiB total fail
 explicitly. Missing, conflicting, truncated, reordered or checksum-invalid frames
-cannot produce `output_complete=true`. A timeout terminates the local terminal;
-the helper may still be waiting for acknowledgement on the guest. Such an
-interrupted helper is not treated as a shell and is not retried automatically.
+cannot produce `output_complete=true`. After a timeout, a connected and readable
+terminal is kept open even if the helper may still be waiting for acknowledgement
+on the guest. Such an interrupted helper is not treated as a shell and is not
+retried automatically.
 
-The default command timeout is 120 seconds (maximum 300); the Codex tool timeout
-must accommodate that bound. Live validation is explicit:
+The default command timeout is 120 seconds; explicit command captures can run up
+to 900 seconds for slow CMS Git gates. The Codex tool timeout must accommodate
+the requested bound. A timeout still leaves the result incomplete and requires
+failed-capture reconciliation before another command. Live validation is explicit:
 
 ```sh
 .venv/bin/python -B validate_cms_commands.py --live --create-runner --credential-file ~/.config/ibm-cms/credentials.json --output cms-command-evidence.json

@@ -10,7 +10,7 @@ from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
 from cms_mcp import device_selector
 
-EXPECTED = {"cms_connect", "cms_screen", "cms_status", "cms_send", "cms_disconnect", "cms_login", "cms_startup", "cms_prepare_runner", "cms_command", "cms_query_links", "cms_download", "cms_edit_prepare", "cms_edit_plan", "cms_operation_plan", "cms_upload_create_only", "cms_upload_file"}
+EXPECTED = {"cms_connect", "cms_screen", "cms_status", "cms_send", "cms_disconnect", "cms_login", "cms_startup", "cms_abort_read", "cms_prepare_runner", "cms_command", "cms_resolve_failed_capture", "cms_query_links", "cms_download", "cms_edit_prepare", "cms_edit_plan", "cms_operation_plan", "cms_upload_create_only", "cms_upload_file"}
 
 
 def content(result):
@@ -67,10 +67,16 @@ async def validate(live=False, device="0200@"):
                 if not (result["ok"] is False):
                     raise RuntimeError('Offline startup was not rejected')
                 evidence["offline_startup_rejected"] = True
+                if not (content(await session.call_tool("cms_abort_read", {}))["ok"] is False):
+                    raise RuntimeError('Offline HX recovery was not rejected')
+                evidence["offline_abort_read_rejected"] = True
                 if not (content(await session.call_tool("cms_command", {"command": "QUERY DISK"}))["ok"] is False):
                     raise RuntimeError('Offline command execution was not rejected')
                 if not (content(await session.call_tool("cms_prepare_runner", {}))["ok"] is False):
                     raise RuntimeError('Offline runner provisioning was not rejected')
+                if not (content(await session.call_tool("cms_resolve_failed_capture", {
+                        "token": "0" * 16}))['ok'] is False):
+                    raise RuntimeError('Offline failed-capture recovery was not rejected')
                 evidence["offline_commands_rejected"] = True
                 link_result = content(await session.call_tool("cms_query_links", {"vaddr": "191"}))
                 if not (link_result["ok"] is False and link_result["replacement_safe"] is False):

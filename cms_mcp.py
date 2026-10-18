@@ -16,6 +16,7 @@ from typing import Literal
 from py3270 import Emulator, CommandError
 from cms_credentials import FileCredentialProvider
 from cms_capture import any_cms_command, mask_frames, readonly_command
+from cms_commands import ready_rc
 
 logging.getLogger("py3270").disabled = True
 
@@ -135,7 +136,8 @@ class PipeApp:
     """py3270 application transport with deadlines and drained stderr.
 
     py3270's ordinary pipe readline is unbounded. A reader thread and queue keep
-    emulator faults from hanging MCP. A timeout poisons the session; no retries.
+    emulator faults from hanging MCP. After a timeout, Session attempts one
+    bounded screen capture to resynchronize before deciding whether to stop it.
     """
     def __init__(self):
         executable = shutil.which("s3270")
@@ -212,6 +214,7 @@ class PipeApp:
 
 class Session:
     def __init__(self, allow_input=False, factory=None, allow_login=False, credential_provider=None, allow_startup=False,
+                 allow_hx=False,
                  allow_commands=False, runner_name=None, allow_downloads=False,
                  download_root=None, download_runner_name=None, allow_local_edits=False,
                  allow_create_only_upload=False, allow_query_links=False, allow_arbitrary_commands=False,
@@ -222,6 +225,7 @@ class Session:
         self.allow_input = allow_input
         self.allow_login = allow_login
         self.allow_startup = allow_startup
+        self.allow_hx = allow_hx
         self.allow_commands = allow_commands
         self.allow_arbitrary_commands = allow_arbitrary_commands
         self.allow_downloads = allow_downloads
@@ -351,6 +355,7 @@ class Session:
                   "field_layout_error": layout_error, "input_enabled": self.allow_input,
                   "login_enabled": self.allow_login,
                   "startup_enabled": self.allow_startup,
+                  "hx_abort_enabled": self.allow_hx,
                   "readonly_commands_enabled": self.allow_commands and not self.allow_arbitrary_commands,
                   "arbitrary_commands_enabled": self.allow_commands and self.allow_arbitrary_commands,
                   "downloads_enabled": self.allow_downloads,
@@ -380,6 +385,11 @@ class Session:
         self.downloader.reader.completed_token = None
         self.completed_capture_token = None
         self.completed_capture_tokens.clear()
+        self.capture_token = None
+        self._protocol_rows = []
+        self.runner.resolved_failed_capture_tokens.clear()
+        self.runner.failed_capture_observation_only = False
+        self.runner.recovery_observation_count = 0
         if self.em is not None:
             try:
                 # Closing our dedicated process only; never send LOGOFF or Clear.
@@ -396,20 +406,36 @@ class Session:
             try:
                 return {"ok": True, **function()}
             except Exception as exc:
-                # An unbounded/partial pipe reply cannot safely be reused.
                 evidence = {"operation": operation, "error_type": type(exc).__name__,
                             "message": self.redact(str(exc)), "trace": self.trace,
                             "last_screen": self.last_screen}
                 if self.em is not None:
-                    if not isinstance(exc, (TimeoutError, BrokenPipeError)):
+                    app = self.em.app
+                    process = getattr(app, "sp", None)
+                    process_alive = process is None or process.poll() is None
+                    screen = None
+                    if process_alive:
                         try:
-                            self.em.app.deadline = time.monotonic() + 2
-                            evidence["failure_screen"] = self.snapshot()
+                            # This is diagnostic/resynchronization only. Never
+                            # repeat the CMS command or terminal input that failed.
+                            app.deadline = time.monotonic() + 3
+                            screen = self.snapshot()
+                            evidence["failure_screen"] = screen
                         except Exception:
                             evidence["failure_screen_unavailable"] = True
-                    app = self.em.app
+                    if (screen is not None and screen.get("connected")
+                            and screen.get("row_count") == ROWS):
+                        # A complete fresh screen proves the terminal pipe still
+                        # works. Keep the same session open for operator recovery.
+                        app.deadline = time.monotonic() + 15
+                        evidence["emulator_stderr"] = self.redact(bytes(app.stderr).decode("utf-8", "replace"))
+                        evidence["session_preserved"] = True
+                        evidence["session_terminated"] = False
+                        evidence["cms_command_complete"] = None
+                        return {"ok": False, **evidence}
                     self._stop()
                     evidence["emulator_stderr"] = self.redact(bytes(app.stderr).decode("utf-8", "replace"))
+                    evidence["session_preserved"] = False
                     evidence["session_terminated"] = True
                 return {"ok": False, **evidence}
 
@@ -459,6 +485,7 @@ class Session:
                 return {"ok": True, "connected": False, "state": "disconnected",
                         "input_enabled": self.allow_input, "login_enabled": self.allow_login,
                         "startup_enabled": self.allow_startup,
+                        "hx_abort_enabled": self.allow_hx,
                         "readonly_commands_enabled": self.allow_commands and not self.allow_arbitrary_commands,
                         "arbitrary_commands_enabled": self.allow_commands and self.allow_arbitrary_commands,
                         "downloads_enabled": self.allow_downloads,
@@ -915,6 +942,86 @@ class Session:
             self.runner.verified = False
             return {"ok": True, "connected": False, "terminated": existed}
 
+    @staticmethod
+    def _hx_read_boundary(screen, staged_hx=False):
+        rows = screen.get("rows", [])
+        fields = [field for field in screen.get("fields", []) if not field["protected"]]
+        return (screen.get("connected") and screen.get("keyboard") == "U"
+                and screen.get("state") == "vm_read"
+                and screen.get("screen_kind") == "zvm_guest_banner"
+                and screen.get("field_layout_error") is None
+                and len(rows) == ROWS and "VM READ" in rows[-1].upper()
+                and "CP READ" not in rows[-1].upper()
+                and re.search(r"\bRECONNECTED AT\b", "\n".join(rows), re.I)
+                and len(fields) == 1
+                and (fields[0]["row"], fields[0]["column"], fields[0]["length"],
+                     fields[0]["nondisplay"], fields[0]["empty"])
+                    == (23, 1, 139, False, not staged_hx)
+                and screen.get("cursor") == {"row": 23, "column": 3 if staged_hx else 1,
+                                               "protected": False})
+
+    def abort_read(self, timeout=15):
+        """Send only HX+Enter at the exact reconnect VM READ boundary.
+
+        HX intentionally abends the waiting EXEC, so CMS Ready may carry a
+        nonzero return code. Completion here means fresh Ready plus the runner
+        input field, not a successful command return code.
+        """
+        with self.lock:
+            if not self.allow_hx:
+                return {"ok": False, "message": "HX recovery requires --allow-hx"}
+            if type(timeout) is not int or not 1 <= timeout <= 30:
+                return {"ok": False, "message": "HX recovery timeout must be 1..30 seconds"}
+            if self.em is None:
+                return {"ok": False, "message": "Connect and inspect the VM READ screen first"}
+
+            def work():
+                before = self.snapshot()
+                staged_hx = (self._hx_read_boundary(before, staged_hx=True)
+                             and before.get("_expected_input_matches"))
+                if staged_hx:
+                    typed = before
+                    actions = ["HX (already verified in input field)"]
+                elif not self._hx_read_boundary(before):
+                    return {"ok": False, "outcome": "hx_boundary_not_verified",
+                            "screen": before, "actions": [], "cms_command_complete": None}
+                else:
+                    self.command("MoveCursor(22,0)")
+                    check = self.snapshot()
+                    if (not self._hx_read_boundary(check)
+                            or host_display(check) != host_display(before)):
+                        return {"ok": False, "outcome": "hx_boundary_changed",
+                                "screen": check, "actions": [], "cms_command_complete": None}
+                    self.command('String("HX")')
+                    typed = self.snapshot(_expected_input="HX")
+                    if (not self._hx_read_boundary(typed, staged_hx=True)
+                            or not typed.get("_expected_input_matches")
+                            or host_display(typed) != host_display(check)):
+                        return {"ok": False, "outcome": "hx_input_not_verified",
+                                "screen": typed, "actions": [], "cms_command_complete": None}
+                    actions = ["HX"]
+                self.command("Ascii")
+                self.command("Enter")
+                deadline = time.monotonic() + timeout
+                previous = typed
+                while time.monotonic() < deadline:
+                    self._wait_output(1)
+                    after = self.snapshot()
+                    ready = [ready_rc(row) for row in after["rows"] if ready_rc(row) is not None]
+                    if (host_display(after) != host_display(previous)
+                            and after["state"] == "cms_ready"
+                            and ready
+                            and self.runner.input_field(after)):
+                        self.capture_token = None
+                        self._protocol_rows = []
+                        return {"outcome": "hx_recovery_ready_observed", "actions": actions + ["Enter"],
+                                "cms_ready_return_code": ready[-1], "cms_command_complete": None,
+                                "screen": after}
+                    previous = after
+                raise TimeoutError("HX was submitted, but fresh CMS Ready was not observed")
+
+            return self._run("abort_read", work, timeout + 2)
+
 
 def create_server(session):
     from contextlib import asynccontextmanager
@@ -993,6 +1100,17 @@ def create_server(session):
         return session.startup(timeout, verify_cms, begin_vm)
 
     @server.tool()
+    def cms_abort_read(timeout: int = 15) -> dict:
+        """Send exactly HX then Enter at a verified, empty reconnect VM READ field.
+
+        Requires --allow-hx and the exact fresh z/VM 6.3 RECONNECTED banner,
+        VM READ footer, row-23 empty input field and cursor position. Generic
+        terminal input stays disabled. HX abends the waiting EXEC, so Ready may
+        carry a nonzero code; the tool requires fresh Ready and the runner field.
+        """
+        return session.abort_read(timeout)
+
+    @server.tool()
     def cms_prepare_runner(create: bool = False) -> dict:
         """Verify a configured runner, or explicitly create one new randomly named EXEC on A.
 
@@ -1010,11 +1128,25 @@ def create_server(session):
         Requires --allow-commands and a source-verified runner. --allow-arbitrary-commands
         removes the read-only allowlist while retaining one-line printable input,
         complete nonce-correlated output, byte counts, checksums, acknowledgements
-        and actual CMS return codes. The wrapper reserves | and # for capture
+        and actual CMS return codes (with explicit timeout up to 900 seconds).
+        The wrapper reserves | and # for capture
         framing; interactive/full-screen commands cannot return a complete result.
         """
         with session.lock:
             return session.runner.run(command, timeout)
+
+    @server.tool()
+    def cms_resolve_failed_capture(token: str,
+                                   resume_arbitrary_commands: bool = False) -> dict:
+        """Resolve one exact visible F 0 ACK / Ready(12) capture failure.
+
+        This sends no CMS input and never reconstructs or completes the failed
+        output. By default, the next command calls remain read-only until this
+        operation is explicitly repeated with resume_arbitrary_commands=true.
+        Arbitrary resumption requires --allow-arbitrary-commands at server start.
+        """
+        with session.lock:
+            return session.runner.resolve_failed_capture(token, resume_arbitrary_commands)
 
     @server.tool()
     def cms_query_links(vaddr: str, timeout: int = 120) -> dict:
@@ -1124,6 +1256,7 @@ def main():
     parser.add_argument("--allow-input", action="store_true", help="Enable explicitly authorized terminal input")
     parser.add_argument("--allow-login", action="store_true", help="Enable one-shot local-credential login only")
     parser.add_argument("--allow-startup", action="store_true", help="Enable verified logon/startup continuation only")
+    parser.add_argument("--allow-hx", action="store_true", help="Enable exact HX+Enter recovery at verified reconnect VM READ only")
     parser.add_argument("--credential-file", help="Path to owner-only JSON credentials; no values in MCP arguments")
     parser.add_argument("--allow-commands", action="store_true", help="Enable correlated CMS command capture")
     parser.add_argument("--allow-arbitrary-commands", action="store_true",
@@ -1151,7 +1284,8 @@ def main():
         parser.error("--allow-uploads requires --upload-root")
     session = Session(allow_input=args.allow_input, allow_login=args.allow_login,
                       credential_provider=FileCredentialProvider(args.credential_file) if args.credential_file else None,
-                      allow_startup=args.allow_startup, allow_commands=args.allow_commands, runner_name=args.runner_name,
+                      allow_startup=args.allow_startup, allow_hx=args.allow_hx,
+                      allow_commands=args.allow_commands, runner_name=args.runner_name,
                       allow_arbitrary_commands=args.allow_arbitrary_commands,
                       allow_downloads=args.allow_downloads, download_root=args.download_root,
                       allow_uploads=args.allow_uploads, upload_root=args.upload_root,

@@ -232,6 +232,86 @@ class CommandTests(unittest.TestCase):
         self.assertIn('Unresolved runner output', result['message'])
         self.assertEqual(before, len([call for call in fake.calls if call.startswith('String(')]))
 
+    def test_failed_capture_recovery_requires_exact_f_ack_and_ready_12(self):
+        token='105FC1D01AB57F97'
+        for marker, ready in ((f'ZM1 {token} F 1 ACK', 'Ready(00012);'),
+                              (f'ZM1 {token} F 0 ACK', 'Ready;'),
+                              (f'ZM1 {token} Z 0 DONE', 'Ready(00012);')):
+            with self.subTest(marker=marker, ready=ready):
+                s,fake=self.session()
+                fake.rows=[' '*80 for _ in range(24)]
+                fake.rows[3]=marker.ljust(80)
+                fake.rows[4]=ready.ljust(80)
+                fake.rows[-1]=(' '*60+'RUNNING').ljust(80)
+                result=s.runner.resolve_failed_capture(token)
+                self.assertFalse(result['ok'])
+                self.assertFalse(result['output_complete'])
+                self.assertFalse(any(call in {'Enter','Clear'} for call in fake.calls))
+
+    def test_failed_capture_recovery_is_incomplete_and_readonly_by_default(self):
+        token='105FC1D01AB57F97'
+        s,fake=self.session()
+        s.runner.name='ZMABCDEF'
+        s.runner.verified=True
+        fake.rows=[' '*80 for _ in range(24)]
+        fake.rows[3]=f'ZM1 {token} F 0 ACK'.ljust(80)
+        fake.rows[4]='Ready(00012); T=10.00/10.00'.ljust(80)
+        fake.rows[-1]=(' '*60+'RUNNING').ljust(80)
+        result=s.runner.resolve_failed_capture(token)
+        self.assertTrue(result['ok'],result)
+        self.assertEqual(result['outcome'],'failed_capture_resolved_for_observation_only')
+        self.assertEqual(result['cms_rc'],12)
+        self.assertFalse(result['output_complete'])
+        self.assertFalse(result['integrity_verified'])
+        self.assertFalse(result['cms_command_complete'])
+        before=len([call for call in fake.calls if call in {'Enter','Clear'}])
+        denied=s.runner.run('ERASE M168TST DATA A')
+        self.assertFalse(denied['ok'])
+        self.assertIn('Only QUERY CMSLEVEL',denied['message'])
+        self.assertEqual(before,len([call for call in fake.calls if call in {'Enter','Clear'}]))
+        observed=s.runner.run('STATE M168TST DATA A')
+        self.assertTrue(observed['ok'],observed)
+        self.assertTrue(observed['output_complete'])
+        self.assertTrue(s.runner.failed_capture_observation_only)
+
+    def test_failed_capture_arbitrary_resume_requires_explicit_flag(self):
+        token='105FC1D01AB57F97'
+        s,fake=self.session()
+        from cms_capture import any_cms_command
+        s.allow_arbitrary_commands=True
+        s.runner.policy=any_cms_command
+        s.runner.name='ZMABCDEF'
+        s.runner.verified=True
+        fake.rows=[' '*80 for _ in range(24)]
+        fake.rows[3]=f'ZM1 {token} F 0 ACK'.ljust(80)
+        fake.rows[4]='Ready(00012);'.ljust(80)
+        fake.rows[-1]=(' '*60+'RUNNING').ljust(80)
+        observed=s.runner.resolve_failed_capture(token)
+        self.assertTrue(observed['ok'],observed)
+        self.assertFalse(observed['arbitrary_commands_enabled'])
+        premature=s.runner.resolve_failed_capture(token,resume_arbitrary_commands=True)
+        self.assertFalse(premature['ok'])
+        self.assertIn('complete a read-only observation',premature['message'])
+        observation=s.runner.run('STATE M168TST DATA A')
+        self.assertTrue(observation['ok'],observation)
+        result=s.runner.resolve_failed_capture(token,resume_arbitrary_commands=True)
+        self.assertTrue(result['ok'],result)
+        self.assertEqual(result['outcome'],'failed_capture_resolved_commands_resumed')
+        self.assertTrue(result['arbitrary_commands_enabled'])
+        self.assertFalse(s.runner.failed_capture_observation_only)
+
+    def test_command_capture_timeout_supports_fifteen_minutes(self):
+        s,fake=self.session()
+        s.runner.name='ZMABCDEF'
+        s.runner.verified=True
+        result=s.runner.run('QUERY CMSLEVEL',timeout=900)
+        self.assertTrue(result['ok'],result)
+        self.assertTrue(result['output_complete'])
+        self.assertTrue(any(call.startswith('String("EXEC ') for call in fake.calls))
+        refused=s.runner.run('QUERY CMSLEVEL',timeout=901)
+        self.assertFalse(refused['ok'])
+        self.assertIn('configured standard/audit deadline',refused['message'])
+
     def test_completion_history_is_bounded_and_disconnect_scoped(self):
         s, fake = self.session()
         tokens = [f'{number:016X}' for number in range(129)]

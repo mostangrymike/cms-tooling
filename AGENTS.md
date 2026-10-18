@@ -71,6 +71,11 @@
   operation are explicitly part of the current task. The presence of an
   approval-free general command tool is not blanket production-write authority.
 - Use one dedicated persistent s3270 process; serialize every terminal operation.
+- Keep that session open whenever a bounded fresh-screen capture confirms the
+  terminal is connected and readable, including after a command/capture error.
+  Never retry the failed command automatically. Terminate s3270 only when its
+  process has exited or the screen pipe cannot be resynchronized and a complete
+  connected screen cannot be recovered; return sanitized failure evidence.
 - Never interpret keyboard unlock, a stale Ready prompt, or screen change as proof
   of CMS command completion. Command completion needs correlated output and RC.
 - Do not scroll with sleeps to collect bulk output. Future transfers/capture must
@@ -79,7 +84,8 @@
   terminal input, passwords, nondisplay field contents, or raw ReadBuffer hex.
 - Retain complete sanitized screen geometry and diagnostic evidence on failures.
 - Run offline unit tests and protocol validation before any live test. The live
-  smoke test must only connect, read screen/status, and terminate the terminal.
+  smoke test must only connect and read screen/status; leave a connected,
+  responsive terminal open rather than disconnecting to end the smoke test.
 - Do not claim live or Codex discovery validation unless it actually ran.
 - `cms_operation_plan` is local review only under --allow-local-edits. It binds
   a pinned changed source review to a declared recipe, lists missing inputs and

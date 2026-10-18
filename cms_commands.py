@@ -26,7 +26,10 @@ class RunnerBridge:
         self.source = source
         self.policy = policy
         self.bootstrap_evidence = None
-        self.max_timeout = 300
+        self.max_timeout = 900
+        self.resolved_failed_capture_tokens = set()
+        self.failed_capture_observation_only = False
+        self.recovery_observation_count = 0
 
     @staticmethod
     def input_field(screen):
@@ -67,12 +70,106 @@ class RunnerBridge:
         if screen["state"] != "cms_ready" or not self.input_field(screen):
             raise CaptureError("Establish CMS Ready and an empty input field before command execution")
         # Never mistake an interrupted runner's old Ready prompt for a shell.
-        completed = {*s.completed_capture_tokens, self.completed_token, s.completed_capture_token}
+        completed = {*s.completed_capture_tokens, self.completed_token, s.completed_capture_token,
+                     *self.resolved_failed_capture_tokens}
         for row in screen["rows"]:
             match = re.search(r"ZM1 ([0-9A-F]{16}) [BRDZF] ", row)
             if match and match[1] not in completed:
                 raise CaptureError("Unresolved runner output is present; refusing a new command")
         return screen
+
+    def resolve_failed_capture(self, token, resume_arbitrary_commands=False):
+        """Resolve only a visible, terminal F-ACK failure; never complete its capture.
+
+        The operation is observation-only. It records that the failed helper is
+        no longer waiting at the CMS prompt so that bounded reconciliation can
+        proceed. Output and the original command result remain incomplete. By
+        default, follow-up commands remain restricted to the read-only allowlist.
+        """
+        s = self.session
+        if not s.allow_commands:
+            return {"ok": False, "message": "Command recovery requires --allow-commands"}
+        if not isinstance(token, str) or not re.fullmatch(r"[0-9A-F]{16}", token):
+            return {"ok": False, "message": "Supply the exact uppercase 16-hex failed request token"}
+        if type(resume_arbitrary_commands) is not bool:
+            return {"ok": False, "message": "resume_arbitrary_commands must be boolean"}
+        if resume_arbitrary_commands and not s.allow_arbitrary_commands:
+            return {"ok": False, "message": "Arbitrary CMS commands are not enabled for this server"}
+        if resume_arbitrary_commands and (token not in self.resolved_failed_capture_tokens
+                                          or self.recovery_observation_count < 1):
+            return {"ok": False, "message": "Resolve the failed capture and complete a read-only observation before resuming arbitrary commands"}
+
+        def candidate(screen):
+            if (screen.get("state") != "cms_ready" or not self.input_field(screen)
+                    or screen.get("capture_active")):
+                return False
+            rows = screen.get("rows", [])
+            protocol = []
+            for index, row in enumerate(rows):
+                match = re.search(r"ZM1 ([0-9A-F]{16}) ([BRDZF]) ([0-9]+)(?: (.*))?$", row.strip())
+                if match:
+                    protocol.append((index, match[1], match[2], match[3], match[4] or ""))
+                elif re.search(r"\bZA1 [0-9A-F]{16} \d+\b", row):
+                    return False
+            if (len(protocol) != 1 or protocol[0][1:] != (token, "F", "0", "ACK")):
+                return False
+            ready = [(index, ready_rc(row)) for index, row in enumerate(rows)
+                     if ready_rc(row) is not None]
+            return len(ready) == 1 and ready[0][1] == 12 and protocol[0][0] < ready[0][0]
+
+        def observed_ready(screen):
+            if (screen.get("state") != "cms_ready" or not self.input_field(screen)
+                    or screen.get("capture_active")):
+                return False
+            capture_token = s.completed_capture_token
+            if capture_token is None or capture_token not in s.completed_capture_tokens:
+                return False
+            rows = screen.get("rows", [])
+            known = {*s.completed_capture_tokens, self.completed_token,
+                     s.completed_capture_token, *self.resolved_failed_capture_tokens}
+            markers = []
+            for index, row in enumerate(rows):
+                match = re.search(r"ZM1 ([0-9A-F]{16}) ([BRDZF]) ([0-9]+)(?: (.*))?$", row.strip())
+                if match:
+                    if match[1] not in known:
+                        return False
+                    if match[1] == capture_token and match[2] == "Z" and match[4] == "DONE":
+                        markers.append(index)
+                elif re.search(r"\bZA1 [0-9A-F]{16} \d+\b", row):
+                    return False
+            ready = [(index, ready_rc(row)) for index, row in enumerate(rows)
+                     if ready_rc(row) is not None]
+            return len(markers) == 1 and any(index > markers[0] for index, _ in ready)
+
+        def work():
+            first = s.snapshot()
+            failed_boundary = candidate(first)
+            observed_boundary = resume_arbitrary_commands and observed_ready(first)
+            if not failed_boundary and not observed_boundary:
+                return {"ok": False, "outcome": "failed_capture_boundary_not_verified",
+                        "screen": first, "output_complete": False,
+                        "cms_command_complete": False}
+            second = s.snapshot()
+            stable_boundary = (candidate(second) if failed_boundary else observed_ready(second))
+            if (not stable_boundary or first["rows"] != second["rows"]
+                    or first.get("terminal_status") != second.get("terminal_status")):
+                return {"ok": False, "outcome": "failed_capture_screen_not_stable",
+                        "screen": second, "output_complete": False,
+                        "cms_command_complete": False}
+            self.resolved_failed_capture_tokens.add(token)
+            self.failed_capture_observation_only = not resume_arbitrary_commands
+            if not resume_arbitrary_commands:
+                self.recovery_observation_count = 0
+            return {"outcome": ("failed_capture_resolved_commands_resumed"
+                                if resume_arbitrary_commands else
+                                "failed_capture_resolved_for_observation_only"),
+                    "request_id": token, "cms_rc": 12,
+                    "output_complete": False, "integrity_verified": False,
+                    "cms_command_complete": False,
+                    "arbitrary_commands_enabled": not self.failed_capture_observation_only,
+                    "screen": second}
+
+        return s._run("resolve_failed_capture", work, timeout=10)
 
     def _simple(self, command, deadline):
         """Internal fixed read-only observations; require echoed command and Ready RC.
@@ -202,7 +299,9 @@ class RunnerBridge:
         s = self.session
         try:
             command = self.policy(command)
-            if (type(self.max_timeout) is not int or self.max_timeout not in (300, 600)
+            if self.failed_capture_observation_only:
+                readonly_command(command)
+            if (type(self.max_timeout) is not int or self.max_timeout not in (300, 600, 900)
                     or type(timeout) is not int or not 1 <= timeout <= self.max_timeout):
                 raise ValueError("Command timeout exceeds the configured standard/audit deadline")
         except ValueError as exc:
@@ -253,6 +352,8 @@ class RunnerBridge:
                                 self.completed_token = token
                                 s.completed_capture_token = token
                                 s.completed_capture_tokens.append(token)
+                                if self.failed_capture_observation_only:
+                                    self.recovery_observation_count += 1
                                 s.capture_token = None
                                 return {"command": "<submitted; input omitted from diagnostics>",
                                         "request_id": token, "runner": self.name,

@@ -271,7 +271,9 @@ class LoginTests(unittest.TestCase):
         self.assertFalse(result["ok"])
         self.assertNotIn("S3cret", json.dumps(result))
         self.assertNotIn("TESTUSER", json.dumps(result))
-        self.assertTrue(fake.closed)
+        self.assertTrue(result["session_preserved"])
+        self.assertFalse(result["session_terminated"])
+        self.assertFalse(fake.closed)
 
 
 if __name__ == "__main__":
