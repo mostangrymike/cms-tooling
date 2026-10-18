@@ -87,6 +87,41 @@ class ClassificationTests(unittest.TestCase):
         self.assertTrue(all(f["protected"] for f in captured["fields"]))
         self.assertEqual(captured["cursor"], {"row": 1, "column": 1, "protected": True})
 
+    def test_zvm_guest_reconnect_banner_is_distinct_from_hercules_console(self):
+        rows = [" " * 80 for _ in range(24)]
+        rows[1] = "15:40:37 z/VM Version 6 Release 3.0, Service Level 1302".ljust(80)
+        rows[5] = "15:40:37 RECONNECTED AT 15:40:37 EST SATURDAY 10/17/26".ljust(80)
+        rows[23] = ("VM READ" + " " * 133).ljust(80)
+        result = classify(rows)
+        self.assertEqual(result["state"], "vm_read")
+        self.assertEqual(result["screen_kind"], "zvm_guest_banner")
+
+    def test_hercules_running_banner_is_observational_vm_running(self):
+        rows = [" " * 80 for _ in range(24)]
+        rows[0] = "Hercules Version  : 4.7.0".ljust(80)
+        rows[23] = "RUNNING   ********".ljust(80)
+        result = classify(rows)
+        self.assertEqual(result["state"], "vm_running")
+        self.assertEqual(result["screen_kind"], "hercules_banner")
+
+    def test_stale_password_banner_with_exact_guest_vm_read_refines_to_startup(self):
+        rows = screen()
+        rows[0] = "Hercules Version  : 4.7.0".ljust(80)
+        rows[7] = "ENTER PASSWORD (IT WILL NOT APPEAR WHEN TYPED):".ljust(80)
+        rows[13] = "LOGON AT 15:11:45 EST SATURDAY 10/17/26".ljust(80)
+        rows[23] = (" " * 60 + "VM READ VMACCOUNT").ljust(80)
+        fake = FakeEmulator(rows)
+        fake.buffer = buffer({0: "20", 1759: "00", 1899: "20", 1919: "20"})
+        fake.cursor = (22, 0)
+        session = Session(factory=lambda: fake)
+        result = session.connect("auto")["screen"]
+        self.assertEqual(result["state"], "vm_read")
+        self.assertIn("vm_read", result["indicators"])
+        editable = [field for field in result["fields"] if not field["protected"]]
+        self.assertEqual(len(editable), 1)
+        self.assertTrue(editable[0]["empty"])
+        self.assertNotIn("VMACCOUNT", json.dumps(result))
+
 
 class CapturedLoginTests(unittest.TestCase):
     def test_combined_login_form_is_not_password_prompt(self):
@@ -113,6 +148,15 @@ class RedactionTests(unittest.TestCase):
         safe = sanitize_rows(rows, field_layout(buffer()), set())
         self.assertIn("CP READ", safe[23])
         self.assertIn("*********", safe[23])
+        self.assertNotIn("VMACCOUNT", json.dumps(safe))
+
+    def test_vm_read_and_running_identifiers_are_masked(self):
+        rows = screen()
+        rows[22] = "VM READ VMACCOUNT".ljust(80)
+        rows[23] = "RUNNING VMACCOUNT".ljust(80)
+        safe = sanitize_rows(rows, field_layout(buffer()), set())
+        self.assertIn("VM READ", safe[22])
+        self.assertIn("RUNNING", safe[23])
         self.assertNotIn("VMACCOUNT", json.dumps(safe))
 
     def test_attributes_and_wrapped_field(self):
@@ -175,7 +219,7 @@ class SessionTests(unittest.TestCase):
         cp_read = self.startup_fixture("cp_read")
         blank = self.startup_fixture("unknown")
         blank["rows"][6] = "BEGIN".ljust(80)
-        blank["rows"][23] = "RUNNING TACOTICO".ljust(80)
+        blank["rows"][23] = "RUNNING ********".ljust(80)
         screens = iter([cp_read, cp_read, blank])
         calls = []
         session.snapshot = lambda: next(screens)

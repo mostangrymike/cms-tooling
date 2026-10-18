@@ -56,8 +56,8 @@ guest login are separate checks. No terminal groups are created by this tooling.
 | `cms_screen()` | Atomic saved screen: 24 rows of 80 characters, 1-based cursor, keyboard/format status and field metadata. |
 | `cms_status()` | Disconnected status or a fresh screen with heuristic state classification. |
 | `cms_send(action, …)` | One validated terminal action; disabled in the initial registration. |
-| `cms_login(timeout=30)` | Submit local credentials once into the verified combined form; separate `--allow-login` flag required. |
-| `cms_startup(timeout=30, verify_cms=False)` | Continue verified startup; optional fixed read-only CMS verification; requires `--allow-startup`. |
+| `cms_login(timeout=30)` | One-shot local-credential login through the verified combined guest form or exact CP command menu for MAINT; separate `--allow-login` flag required. |
+| `cms_startup(timeout=30, verify_cms=False, begin_vm=False)` | Continue verified startup; `begin_vm=True` sends one lowercase `b` at the exact empty VM READ field; optional fixed read-only CMS verification. Requires `--allow-startup`. |
 | `cms_prepare_runner(create=False)` | Verify a configured helper, or explicitly create one new unique EXEC when create=true. |
 | `cms_command(command, timeout=120)` | Run one CMS command through the correlated runner and return complete native output plus the actual CMS-stage RC. Arbitrary mode has a 108-character limit and reserves `|` and `#` for framing. |
 | `cms_query_links(vaddr, timeout=120)` | Submit only the fixed `CP QUERY LINKS` command for one three-digit virtual address through the observed CMS input field; captures pages until a fresh Ready prompt. |
@@ -77,8 +77,14 @@ are masked position-for-position. After String input, unprotected fields are als
 masked to cover partial input on a failed action. If field parsing fails, the screen is fully
 masked and the error is exposed, rather than risking credential disclosure.
 
-States are `logo`, `login`, `password`, `cp_read`, `vm_read`, `cms_ready`, `more`, `holding`,
-`xedit`, and `unknown`. Classification is heuristic: a Ready prompt may be stale.
+States are `logo`, `login`, `password`, `cp_read`, `vm_read`, `vm_running`,
+`cms_ready`, `more`, `holding`, `xedit`, and `unknown`. A z/VM 6.3 reconnect
+screen with `RUNNING`, an unlocked keyboard, and the exact empty CMS command
+field is classified as `cms_ready`; `VM READ` remains a separate program-input
+state. A preliminary `vm_running` classification is retained when there is not
+enough guest/input-field evidence. Classification is heuristic and does not
+establish command completion. `screen_kind` distinguishes the Hercules emulator
+banner from a z/VM guest login/reconnect banner.
 Screen/status observations leave `cms_command_complete` null. A successful
 `cms_command` sets it true only after verified capture and a fresh wrapper Ready.
 
@@ -126,13 +132,19 @@ pipeline constants can be imported once with `--import-legacy cms_pipeline.py`;
 the importer uses AST constants and never executes the pipeline. The original
 legacy file is preserved and still contains its pre-existing credentials.
 
-`cms_login` verifies the established editable fields and nondisplay password
-attribute, refuses existing/modified input, checks the target cursor before each
-String, and sends Enter only once. It never sends a LOGON command, BEGIN, Clear,
-file transfers or CMS commands. It stops on rejection, CP READ, CMS Ready,
-MORE/HOLDING, or a bounded timeout. CP READ does not mean CMS is ready. General
-`cms_send` stays disabled unless separately authorized and enabled. VM READ is
-also a stopping state; it is distinct from CMS Ready and does not trigger Enter.
+`cms_login` supports two bounded paths. The combined guest form path verifies its
+established userid/password fields and nondisplay password attribute. The CP path
+accepts only the observed `Enter one of the following commands` menu or the
+observed Hercules banner with CP READ, exact row-23 input geometry, and a local
+credential userid of `MAINT`; it submits `LOGON MAINT` once. If CP then presents
+an exact empty nondisplay password field
+at that same input geometry, it submits the local password once as part of that
+login. It never retries or sends other CP commands. Both paths recheck the screen
+and cursor before input, stop on rejection or unexpected transitions, and do not
+send BEGIN, Clear, transfers or CMS commands. CP/VM READ does not mean CMS is
+ready. A separate `cms_startup` call may send one input only after its exact
+startup boundary is verified. General `cms_send` remains disabled unless
+separately authorized and enabled.
 
 Never authorize a command that erases/replaces files implicitly. In particular,
 the old inventory pipeline's `LISTFILE (EXEC` replaces `CMS EXEC A`. This server
@@ -305,16 +317,19 @@ The original result is preserved in `cms-login-evidence.json`. CMS Ready has not
 been established. The next stage needs an authorized continuation of the startup
 prompt before implementing correlated CMS command output and return codes.
 
-`cms_startup` is separately enabled and accepts no command text. It requires the
-recorded logon/reconnect marker, exact 139-character input at row 23 column 1,
-an unlocked keyboard, a visible input field, and an empty field. It verifies the
-cursor and field again before input. It sends one Enter at VM READ, or BEGIN
-and Enter at CP READ, at most once per state in a call. It does not clear any
-input or perform paging. The recorded blank reconnect boundary after our own
-BEGIN may also require an Enter even while the terminal says RUNNING; unrelated
-RUNNING/application screens are refused. A Ready observation after fresh host output is distinct
-from verifying a CMS command return code. Use `--startup` with the live-login
-validator only when this continuation is authorized.
+`cms_startup` is separately enabled and accepts no arbitrary command text. It
+requires a verified CP/VM READ state and exact empty 139-character input at row
+23, column 1, with the recorded logon/reconnect marker or exact startup banner.
+It verifies the cursor and field again before input. It sends one Enter at a
+verified VM READ, lowercase `b` plus Enter only when explicitly requested with
+`begin_vm=True`, or BEGIN plus Enter at CP READ, at most once per call. The `b`
+path verifies the character using an internal boolean comparison against the
+raw screen buffer; neither the value nor raw buffer is returned in diagnostics.
+It does not clear input or perform paging. A z/VM reconnect `RUNNING` screen
+with the exact empty CMS command field is already command-ready and does not
+trigger startup input. The fixed CMSLEVEL probe remains limited to its
+previously verified startup boundary. A Ready observation after fresh host
+output is distinct from verifying a CMS command return code.
 
 The successful fixed `QUERY CMSLEVEL` diagnostic returned `CMS Level 27, Service
 Level 1302` followed by a new `Ready;` prompt. See

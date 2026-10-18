@@ -93,6 +93,43 @@ class LoginEmulator(FakeEmulator):
         return result
 
 
+class CPLogonEmulator(FakeEmulator):
+    def __init__(self, reconnected=True, menu=True):
+        rows = [" " * 80 for _ in range(24)]
+        if menu:
+            rows[1] = "Enter one of the following commands:".ljust(80)
+            rows[3] = "   LOGON userid             *********  LOGON VMUSER1)".ljust(80)
+            rows[4] = "   MSG userid message".ljust(80)
+            rows[5] = "   LOGOFF".ljust(80)
+        else:
+            rows[0] = " Hercules Version  : 4.7.0".ljust(80)
+            rows[6] = " Device number     : 0:SYSG".ljust(80)
+            rows[7] = " Subchannel        : 0008".ljust(80)
+        rows[23] = " " * 60 + "CP READ   ********"
+        super().__init__(rows)
+        self.buffer = buffer({0: "20", 1759: "00", 1899: "20", 1919: "20"})
+        # CP menus place the cursor in the command field. The Hercules banner
+        # can leave it at a protected header location, so login must move it.
+        self.cursor = (22, 0) if menu else (0, 0)
+        self.logon_sent = False
+        self.reconnected = reconnected
+
+    def exec_command(self, action):
+        text = action.decode()
+        if text.startswith("MoveCursor("):
+            self.cursor = tuple(map(int, text[11:-1].split(',')))
+        if text == 'String("LOGON MAINT")':
+            self.logon_sent = True
+        if text == "Enter" and self.logon_sent and self.reconnected:
+            self.rows = [" " * 80 for _ in range(24)]
+            self.rows[5] = "RECONNECTED AT 14:55:11 EST SATURDAY 10/17/26".ljust(80)
+            self.rows[23] = " " * 60 + "CP READ   ********"
+        result = super().exec_command(action)
+        if text == "Snap(Status)":
+            result.data = [f"U F U C(127.0.0.1) I 2 24 80 {self.cursor[0]} {self.cursor[1]} 0x0 -".encode()]
+        return result
+
+
 class LoginTests(unittest.TestCase):
     def session(self, outcome="cms_ready"):
         fake = LoginEmulator(outcome)
@@ -103,6 +140,51 @@ class LoginTests(unittest.TestCase):
 
     def test_default_cannot_login(self):
         self.assertFalse(Session().login()["ok"])
+
+    def test_exact_cp_menu_sends_one_maint_logon_and_observes_reconnect(self):
+        fake = CPLogonEmulator()
+        provider = types.SimpleNamespace(load=lambda: validate("MAINT", "S3cret"))
+        session = Session(factory=lambda: fake, allow_login=True, credential_provider=provider)
+        session.connect("auto")
+        result = session.login()
+        self.assertTrue(result["ok"], result)
+        self.assertEqual(result["outcome"], "cp_read_observed")
+        self.assertEqual(result["submitted"], True)
+        self.assertFalse(result["retry_performed"])
+        self.assertEqual(fake.calls.count('String("LOGON MAINT")'), 1)
+        self.assertEqual(fake.calls.count("Enter"), 1)
+        self.assertNotIn("S3cret", json.dumps(result))
+        self.assertFalse(session.send("Enter")["ok"])
+
+    def test_exact_hercules_cp_read_banner_allows_the_same_single_logon(self):
+        fake = CPLogonEmulator(menu=False)
+        provider = types.SimpleNamespace(load=lambda: validate("MAINT", "S3cret"))
+        session = Session(factory=lambda: fake, allow_login=True, credential_provider=provider)
+        session.connect("auto")
+        result = session.login()
+        self.assertTrue(result["ok"], result)
+        self.assertEqual(fake.calls.count('String("LOGON MAINT")'), 1)
+        self.assertEqual(fake.calls.count("Enter"), 1)
+
+    def test_cp_logon_requires_exact_menu_and_maint_credentials(self):
+        fake = CPLogonEmulator()
+        fake.rows[1] = "Unrelated CP screen".ljust(80)
+        provider = types.SimpleNamespace(load=lambda: validate("MAINT", "S3cret"))
+        session = Session(factory=lambda: fake, allow_login=True, credential_provider=provider)
+        session.connect("auto")
+        result = session.login()
+        self.assertFalse(result["ok"])
+        self.assertEqual(result["outcome"], "cp_logon_boundary_not_verified")
+        self.assertFalse(any(call.startswith("String") or call == "Enter" for call in fake.calls))
+
+        fake = CPLogonEmulator()
+        provider = types.SimpleNamespace(load=lambda: validate("OTHER", "S3cret"))
+        session = Session(factory=lambda: fake, allow_login=True, credential_provider=provider)
+        session.connect("auto")
+        result = session.login()
+        self.assertFalse(result["ok"])
+        self.assertEqual(result["outcome"], "cp_logon_userid_not_maint")
+        self.assertFalse(any(call.startswith("String") or call == "Enter" for call in fake.calls))
 
     def test_login_once_in_verified_fields_no_general_input(self):
         session, fake = self.session()
@@ -115,6 +197,15 @@ class LoginTests(unittest.TestCase):
         self.assertFalse(session.send("Enter")["ok"])
         self.assertIsNone(result["cms_command_complete"])
         self.assertFalse(any(x in fake.calls for x in ("Clear", "EraseInput", 'String("BEGIN")')))
+
+    def test_prior_secret_redaction_does_not_look_like_existing_form_input(self):
+        session, fake = self.session()
+        session.secrets.add("prior-secret")
+        result = session.login()
+        self.assertTrue(result["ok"], result)
+        self.assertEqual(result["outcome"], "cms_ready_observed")
+        self.assertNotIn("prior-secret", json.dumps(result))
+        self.assertEqual(fake.calls.count("Enter"), 1)
 
     def test_cp_read_stops_without_begin(self):
         session, fake = self.session("cp_read")

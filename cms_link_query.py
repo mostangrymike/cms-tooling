@@ -14,6 +14,19 @@ class LinkQuery:
 
     def __init__(self, session):
         self.session = session
+        self.running_prompt_verified = False
+
+    @staticmethod
+    def _running_command_boundary(screen):
+        from cms_commands import RunnerBridge
+        rows = screen.get('rows', [])
+        text = '\n'.join(rows).upper()
+        return (screen.get('state') == 'vm_running'
+                and screen.get('connected') and screen.get('keyboard') == 'U'
+                and screen.get('field_layout_error') is None
+                and RunnerBridge.input_field(screen)
+                and re.search(r'\bRUNNING\b', rows[-1].upper())
+                and not re.search(r'\b(?:VM READ|CP READ|MORE|HOLDING)\b', text))
 
     def query(self, vaddr, timeout=30):
         s = self.session
@@ -65,11 +78,17 @@ class LinkQuery:
                                            expected_echo, flags=re.I)
             deadline = time.monotonic() + timeout
             before = s.snapshot()
-            if before["state"] != "cms_ready" or not RunnerBridge.input_field(before):
+            running_ready = (self.running_prompt_verified
+                             and self._running_command_boundary(before))
+            if ((before["state"] != "cms_ready" and not running_ready)
+                    or not RunnerBridge.input_field(before)):
                 raise RuntimeError("CP QUERY LINKS requires CMS Ready and a verified empty command field")
             s.command("MoveCursor(22,0)")
             check = s.snapshot()
-            if (check["state"] != "cms_ready" or not RunnerBridge.input_field(check)
+            running_check = (self.running_prompt_verified
+                             and self._running_command_boundary(check))
+            if ((check["state"] != "cms_ready" and not running_check)
+                    or not RunnerBridge.input_field(check)
                     or check["cursor"] != {"row": 23, "column": 1, "protected": False}):
                 raise RuntimeError("CMS command field changed; link query was not submitted")
             s.command('String("' + command + '")')
@@ -82,10 +101,12 @@ class LinkQuery:
             released_hold = False
             segments = {}
             page_number = 0
+            running_display = None
+            running_quiet = 0
             while time.monotonic() < deadline:
                 s.command("Ascii")
                 remaining = max(1, min(3, int(deadline - time.monotonic())))
-                s._wait_output(remaining)
+                output_event = s._wait_output(remaining)
                 current = s.snapshot()
                 # Keyboard/output events alone can repeat the same held page.
                 # Never send a second paging key without a changed host display.
@@ -99,7 +120,7 @@ class LinkQuery:
                     if matching_echoes:
                         echo_seen = True
                     start = max(matching_echoes) + 1 if matching_echoes else (0 if released_hold else None)
-                    if start is not None:
+                    if start is not None and current['state'] != 'vm_running':
                         rows = current['rows'][start:22]
                         end = next((i for i, row in enumerate(rows) if ready_rc(row) is not None), len(rows))
                         segments[page_number] = [row.rstrip() for row in rows[:end] if row.strip()]
@@ -113,6 +134,8 @@ class LinkQuery:
                         s.command("Clear")
                         released_hold = True
                         page_number += 1
+                        running_display = None
+                        running_quiet = 0
                         continue
 
                     ready_rows = [i for i, row in enumerate(current["rows"][:22])
@@ -127,13 +150,44 @@ class LinkQuery:
                                 "pages": pages, "page_count": len(pages),
                                 "output_rows": [row for segment in segments.values() for row in segment],
                                 "output_complete": True, "completion_observed": True,
+                                "completion_boundary": "fresh CMS Ready prompt",
                                 "cms_command_complete": None, "replacement_safe": False,
                                 "link_query_is_lock": False,
                                 "host_operations_performed": False}
+
+                # z/VM can redraw the CMS RUNNING prompt between paged output
+                # screens. Observe that state passively; never treat the first
+                # RUNNING redraw as completion or send another paging key.
+                if current['state'] == 'vm_running':
+                    if echo_seen and released_hold and self._running_command_boundary(current):
+                        display = host_display(current)
+                        if fresh or output_event or running_display != display:
+                            running_display = display
+                            running_quiet = 0
+                        else:
+                            running_quiet += 1
+                        if running_quiet >= 2:
+                            self.running_prompt_verified = True
+                            return {"vaddr": vaddr.upper(), "command": s.redact(command),
+                                    "pages": pages, "page_count": len(pages),
+                                    "output_rows": [row for segment in segments.values() for row in segment],
+                                    "output_complete": True, "completion_observed": True,
+                                    "completion_boundary": "stable CMS RUNNING prompt after captured paging",
+                                    "cms_command_complete": None, "replacement_safe": False,
+                                    "link_query_is_lock": False,
+                                    "host_operations_performed": False}
+                    else:
+                        running_display = None
+                        running_quiet = 0
+                    previous = current
+                    continue
                     # A cleared output page can arrive in pieces before Ready.
                     # Observe unknown/RUNNING passively; never advance it.
                     if current["state"] not in {"cms_ready", "more", "holding", "unknown"}:
                         raise RuntimeError("Unexpected terminal state during CP QUERY LINKS")
+                else:
+                    running_display = None
+                    running_quiet = 0
             raise TimeoutError("No fresh echoed CP QUERY LINKS result followed by CMS Ready")
 
         return s._run("query_links", work, timeout + 2)
