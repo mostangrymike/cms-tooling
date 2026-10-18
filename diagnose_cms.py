@@ -8,6 +8,18 @@ import time
 from cms_credentials import FileCredentialProvider
 
 
+def _blank_vm_read_startup(screen):
+    rows = screen.get("rows", [])
+    fields = [f for f in screen.get("fields", []) if not f["protected"]]
+    return (screen.get("state") == "vm_read"
+        and screen.get("screen_kind") in {"hercules_banner", "zvm_guest_banner"}
+        and screen.get("connected") and screen.get("keyboard") == "U"
+        and screen.get("field_layout_error") is None and len(rows) == 24 and len(fields) == 1
+        and (fields[0]["row"], fields[0]["column"], fields[0]["length"],
+             fields[0]["nondisplay"], fields[0]["empty"]) == (23, 1, 139, False, True)
+        and "VM READ" in rows[-1].upper() and "CP READ" not in rows[-1].upper())
+
+
 def probe_boundary(result):
     screen = result.get("screen", {})
     fields = [f for f in screen.get("fields", []) if not f["protected"]]
@@ -19,14 +31,28 @@ def probe_boundary(result):
         and rows[6].strip() == 'BEGIN' and rows[8].strip() == 'CMS'
         and all(not row.strip() for i, row in enumerate(rows[7:22], 7) if i != 8)
         and 'Z/VM VERSION 6 RELEASE 3.0' in '\n'.join(rows).upper())
-    return bool((bare_reconnect or result.get("actions") in (["BEGIN", "Enter", "Enter"], ["BEGIN", "Enter", "Enter", "Enter"]))
-                and result.get("outcome") == "startup_transition_timeout"
+    snapshots = result.get('snapshots', [])
+    initial_vm_read = snapshots[0] if snapshots else {}
+    vm_read_transition = (result.get('actions') in (['Enter'], ['b', 'Enter'])
+        and _blank_vm_read_startup(initial_vm_read)
+        and len(rows) == 24 and screen.get('connected') and screen.get('keyboard') == 'U'
+        and screen.get('field_layout_error') is None and len(fields) == 1
+        and fields[0].get('empty') and not fields[0].get('nondisplay')
+        and (fields[0]['row'], fields[0]['column'], fields[0]['length']) == (23, 1, 139)
+        and 'Z/VM VERSION 6 RELEASE 3.0' in '\n'.join(rows).upper()
+        and any(row.strip() == 'CMS' for row in rows[:22]) and 'RUNNING' in rows[-1])
+    outcome = result.get("outcome")
+    transition_allowed = (outcome == "startup_transition_timeout"
+        or (outcome == "startup_transition_observed" and (bare_reconnect or vm_read_transition)))
+    return bool((bare_reconnect or vm_read_transition
+                 or result.get("actions") in (["BEGIN", "Enter", "Enter"], ["BEGIN", "Enter", "Enter", "Enter"]))
+                and transition_allowed
                 and screen.get("connected") and screen.get("keyboard") == "U"
                 and screen.get("field_layout_error") is None
                 and len(fields) == 1 and fields[0].get("empty")
                 and (fields[0]["row"], fields[0]["column"], fields[0]["length"]) == (23, 1, 139)
                 and not fields[0]["nondisplay"] and len(rows) == 24
-                and "RECONNECTED AT" in "\n".join(rows)
+                and ("RECONNECTED AT" in "\n".join(rows) or vm_read_transition)
                 and any(row.strip() == "CMS" for row in rows[:22])
                 and "RUNNING" in rows[-1])
 

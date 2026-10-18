@@ -16,6 +16,7 @@ from typing import Literal
 from py3270 import Emulator, CommandError
 from cms_credentials import FileCredentialProvider
 from cms_capture import any_cms_command, mask_frames, readonly_command
+from cms_commands import ready_rc
 
 logging.getLogger("py3270").disabled = True
 
@@ -43,12 +44,22 @@ def classify(rows: list[str]) -> dict:
         ("cp_read", r"\bCP READ\b"),
         ("cms_ready", r"^\s*READY(?:\(-?[0-9]+\))?;"),
         ("vm_read", r"\bVM READ\b"),
+        # Retain a preliminary RUNNING classification until snapshot() can
+        # combine it with guest-banner and input-field evidence.
+        ("vm_running", r"\bRUNNING\s+[A-Z0-9*#@._-]+\s*$"),
         ("login", r"LOGON USERID|HCPLON\d+[A-Z]|ENTER.*LOGON"),
         ("logo", r"Z/VM ONLINE|HERCULES VERSION(?:\s*:|\s+\d)"),
     ]
     matches = [name for name, pattern in patterns if re.search(pattern, text, re.M)]
+    if "HERCULES VERSION" in text:
+        screen_kind = "hercules_banner"
+    elif (re.search(r"Z/VM VERSION 6 RELEASE 3\.0", text)
+          and re.search(r"\b(?:LOGON AT|RECONNECTED AT)\b", text)):
+        screen_kind = "zvm_guest_banner"
+    else:
+        screen_kind = "guest_or_unknown"
     return {"state": matches[0] if matches else "unknown", "indicators": matches,
-            "screen_kind": "hercules_banner" if "HERCULES VERSION" in text else "guest_or_unknown",
+            "screen_kind": screen_kind,
             "cms_command_complete": None, "classification": "heuristic"}
 
 
@@ -105,7 +116,7 @@ def sanitize_rows(rows: list[str], fields: list[dict], secrets: set[str],
         row = re.sub(r"(?i)(\bLOGON[ \t]+(?!AT(?:[ \t]|$))\S+[ \t]+)(\S+)",
                      lambda m: m[1] + "*" * len(m[2]), row)
         # CP READ may display an account/session identifier after the state.
-        row = re.sub(r"(?i)(\bCP READ[ \t]+)([A-Z0-9$#@._-]+)",
+        row = re.sub(r"(?i)(\b(?:CP READ|VM READ|RUNNING)[ \t]+)([A-Z0-9$#@._-]+)",
                      lambda m: m[1] + "*" * len(m[2]), row)
         safe_rows.append(row)
     return safe_rows
@@ -125,7 +136,8 @@ class PipeApp:
     """py3270 application transport with deadlines and drained stderr.
 
     py3270's ordinary pipe readline is unbounded. A reader thread and queue keep
-    emulator faults from hanging MCP. A timeout poisons the session; no retries.
+    emulator faults from hanging MCP. After a timeout, Session attempts one
+    bounded screen capture to resynchronize before deciding whether to stop it.
     """
     def __init__(self):
         executable = shutil.which("s3270")
@@ -202,6 +214,7 @@ class PipeApp:
 
 class Session:
     def __init__(self, allow_input=False, factory=None, allow_login=False, credential_provider=None, allow_startup=False,
+                 allow_hx=False,
                  allow_commands=False, runner_name=None, allow_downloads=False,
                  download_root=None, download_runner_name=None, allow_local_edits=False,
                  allow_create_only_upload=False, allow_query_links=False, allow_arbitrary_commands=False,
@@ -212,6 +225,7 @@ class Session:
         self.allow_input = allow_input
         self.allow_login = allow_login
         self.allow_startup = allow_startup
+        self.allow_hx = allow_hx
         self.allow_commands = allow_commands
         self.allow_arbitrary_commands = allow_arbitrary_commands
         self.allow_downloads = allow_downloads
@@ -271,7 +285,7 @@ class Session:
             entry["error_type"] = type(exc).__name__
             raise
 
-    def snapshot(self):
+    def snapshot(self, _expected_input=None):
         self.command("Snap(Save)")
         status = self.command("Snap(Status)")[0]
         parts = status.split()
@@ -295,6 +309,40 @@ class Session:
         for field in fields:
             field["empty"] = not any(raw_flat[(field["start_offset"] + n) % 1920].strip()
                                      for n in range(field["length"]))
+        # After a CP LOGON password is accepted, Hercules can retain the
+        # password instruction in the banner while the guest has already
+        # reached its VM READ startup prompt. Refine only this exact empty,
+        # visible, row-23 startup field shape with a fresh LOGON/RECONNECTED
+        # marker; all other password screens remain password screens.
+        editable = [field for field in fields if not field["protected"]]
+        vm_read_startup = (observed["state"] == "password"
+            and observed["screen_kind"] == "hercules_banner"
+            and "VM READ" in rows[23].upper() and "CP READ" not in rows[23].upper()
+            and re.search(r"\b(?:LOGON AT|RECONNECTED AT)\b", "\n".join(rows), re.I)
+            and parts[0] == "U" and layout_error is None and len(editable) == 1
+            and (editable[0]["row"], editable[0]["column"], editable[0]["length"],
+                 editable[0]["nondisplay"], editable[0]["empty"]) == (23, 1, 139, False, True))
+        if vm_read_startup:
+            observed["state"] = "vm_read"
+            observed["indicators"] = [item for item in observed["indicators"] if item != "password"]
+        # A z/VM guest reconnect banner can leave CMS at its command field.
+        # RUNNING is the CMS command-ready state; VM READ is a separate
+        # running-program input state. Recognize only the observed z/VM 6.3
+        # reconnect screen with one fresh, empty command field.
+        zvm_reconnect_cms_ready = (observed["state"] == "vm_running"
+            and observed["screen_kind"] == "zvm_guest_banner"
+            and re.search(r"\bRECONNECTED AT\b", "\n".join(rows), re.I)
+            and "RUNNING" in rows[-1].upper()
+            and parts[0] == "U" and layout_error is None and len(editable) == 1
+            and (editable[0]["row"], editable[0]["column"], editable[0]["length"],
+                 editable[0]["nondisplay"], editable[0]["empty"])
+                    == (23, 1, 139, False, True)
+            and not re.search(r"\b(?:VM READ|CP READ)\b", "\n".join(rows), re.I))
+        if zvm_reconnect_cms_ready:
+            observed["state"] = "cms_ready"
+            observed["indicators"] = [item for item in observed["indicators"] if item != "vm_running"]
+            if "cms_ready" not in observed["indicators"]:
+                observed["indicators"].append("cms_ready")
         safe = sanitize_rows(rows, fields, self.secrets, observed["state"] == "password",
                              layout_error is None)
         safe = mask_frames(safe)
@@ -307,6 +355,7 @@ class Session:
                   "field_layout_error": layout_error, "input_enabled": self.allow_input,
                   "login_enabled": self.allow_login,
                   "startup_enabled": self.allow_startup,
+                  "hx_abort_enabled": self.allow_hx,
                   "readonly_commands_enabled": self.allow_commands and not self.allow_arbitrary_commands,
                   "arbitrary_commands_enabled": self.allow_commands and self.allow_arbitrary_commands,
                   "downloads_enabled": self.allow_downloads,
@@ -316,6 +365,15 @@ class Session:
                   "query_links_enabled": self.allow_query_links,
                   "capture_active": self.capture_token is not None,
                   **observed}
+        # Internal startup verification only: report a boolean, never the
+        # unprotected field value. Public screen rows remain redacted.
+        if _expected_input is not None:
+            editable = [field for field in fields if not field["protected"]]
+            matches = (len(editable) == 1 and len(_expected_input) <= editable[0]["length"]
+                and "".join(raw_flat[(editable[0]["start_offset"] + n) % 1920]
+                            for n in range(editable[0]["length"])
+                    ) == _expected_input + " " * (editable[0]["length"] - len(_expected_input)))
+            result["_expected_input_matches"] = bool(matches)
         self.last_screen = result
         return result
 
@@ -327,6 +385,11 @@ class Session:
         self.downloader.reader.completed_token = None
         self.completed_capture_token = None
         self.completed_capture_tokens.clear()
+        self.capture_token = None
+        self._protocol_rows = []
+        self.runner.resolved_failed_capture_tokens.clear()
+        self.runner.failed_capture_observation_only = False
+        self.runner.recovery_observation_count = 0
         if self.em is not None:
             try:
                 # Closing our dedicated process only; never send LOGOFF or Clear.
@@ -343,20 +406,36 @@ class Session:
             try:
                 return {"ok": True, **function()}
             except Exception as exc:
-                # An unbounded/partial pipe reply cannot safely be reused.
                 evidence = {"operation": operation, "error_type": type(exc).__name__,
                             "message": self.redact(str(exc)), "trace": self.trace,
                             "last_screen": self.last_screen}
                 if self.em is not None:
-                    if not isinstance(exc, (TimeoutError, BrokenPipeError)):
+                    app = self.em.app
+                    process = getattr(app, "sp", None)
+                    process_alive = process is None or process.poll() is None
+                    screen = None
+                    if process_alive:
                         try:
-                            self.em.app.deadline = time.monotonic() + 2
-                            evidence["failure_screen"] = self.snapshot()
+                            # This is diagnostic/resynchronization only. Never
+                            # repeat the CMS command or terminal input that failed.
+                            app.deadline = time.monotonic() + 3
+                            screen = self.snapshot()
+                            evidence["failure_screen"] = screen
                         except Exception:
                             evidence["failure_screen_unavailable"] = True
-                    app = self.em.app
+                    if (screen is not None and screen.get("connected")
+                            and screen.get("row_count") == ROWS):
+                        # A complete fresh screen proves the terminal pipe still
+                        # works. Keep the same session open for operator recovery.
+                        app.deadline = time.monotonic() + 15
+                        evidence["emulator_stderr"] = self.redact(bytes(app.stderr).decode("utf-8", "replace"))
+                        evidence["session_preserved"] = True
+                        evidence["session_terminated"] = False
+                        evidence["cms_command_complete"] = None
+                        return {"ok": False, **evidence}
                     self._stop()
                     evidence["emulator_stderr"] = self.redact(bytes(app.stderr).decode("utf-8", "replace"))
+                    evidence["session_preserved"] = False
                     evidence["session_terminated"] = True
                 return {"ok": False, **evidence}
 
@@ -406,6 +485,7 @@ class Session:
                 return {"ok": True, "connected": False, "state": "disconnected",
                         "input_enabled": self.allow_input, "login_enabled": self.allow_login,
                         "startup_enabled": self.allow_startup,
+                        "hx_abort_enabled": self.allow_hx,
                         "readonly_commands_enabled": self.allow_commands and not self.allow_arbitrary_commands,
                         "arbitrary_commands_enabled": self.allow_commands and self.allow_arbitrary_commands,
                         "downloads_enabled": self.allow_downloads,
@@ -429,6 +509,140 @@ class Session:
                 or "COMMAND" not in rows[22][:16]):
             raise RuntimeError("Login form or field attributes differ from verified layout; no credentials submitted")
         return fields
+
+    @staticmethod
+    def _blank_vm_read_input(screen):
+        rows = screen.get("rows", [])
+        fields = [f for f in screen.get("fields", []) if not f["protected"]]
+        labelled_vm_read = "VM READ" in rows[-1].upper() and "CP READ" not in rows[-1].upper()
+        return (screen.get("state") == "vm_read"
+                and screen.get("screen_kind") in {"hercules_banner", "zvm_guest_banner"}
+                and screen.get("connected") and screen.get("keyboard") == "U"
+                and screen.get("field_layout_error") is None and len(rows) == 24
+                and len(fields) == 1
+                and (fields[0]["row"], fields[0]["column"], fields[0]["length"],
+                     fields[0]["nondisplay"], fields[0]["empty"])
+                    == (23, 1, 139, False, True)
+                and labelled_vm_read)
+
+    @staticmethod
+    def _runner_protocol_visible(screen):
+        """A startup continuation must not consume a visible capture exchange."""
+        return any(re.match(r"^\s*(?:ZM1|ZA1)\s+[0-9A-F]{16}\b", row)
+                   for row in screen.get("rows", []))
+
+    @staticmethod
+    def _cp_input_field(screen, nondisplay=False, require_cursor=True):
+        fields = [f for f in screen.get("fields", []) if not f["protected"]]
+        return (screen.get("connected") and screen.get("keyboard") == "U"
+                and screen.get("field_layout_error") is None
+                and (not require_cursor or screen.get("cursor") == {
+                    "row": 23, "column": 1, "protected": False})
+                and len(fields) == 1 and fields[0]["row"] == 23
+                and fields[0]["column"] == 1 and fields[0]["length"] == 139
+                and fields[0]["nondisplay"] is nondisplay and fields[0]["empty"])
+
+    @classmethod
+    def _cp_logon_boundary(cls, screen, require_cursor=False):
+        rows = screen.get("rows", [])
+        text = "\n".join(rows).upper()
+        menu = (rows[1].strip() == "Enter one of the following commands:"
+                and re.match(r"\s*LOGON userid\b.*\bLOGON VMUSER1\)", rows[3], re.I)
+                and rows[5].strip() == "LOGOFF")
+        hercules_cp = (screen.get("screen_kind") == "hercules_banner"
+                       and "DEVICE NUMBER" in text and "SUBCHANNEL" in text)
+        return (screen.get("state") == "cp_read" and len(rows) == 24
+                and cls._cp_input_field(screen, nondisplay=False,
+                                        require_cursor=require_cursor)
+                and "CP READ" in rows[23].upper() and (menu or hercules_cp)
+                and not re.search(r"\b(?:RECONNECTED AT|LOGON AT)\b", text, re.I))
+
+    @classmethod
+    def _cp_password_prompt(cls, screen):
+        rows = screen.get("rows", [])
+        return (screen.get("state") == "password" and len(rows) == 24
+                and cls._cp_input_field(screen, nondisplay=True)
+                and re.search(r"\bPASSWORD\b", "\n".join(rows), re.I)
+                and "CP READ" in rows[23].upper())
+
+    def _cp_logon_maint(self, before, deadline):
+        """One locally credentialed LOGON MAINT from the exact CP menu, no retries."""
+        snapshots = [before]
+        if not self._cp_logon_boundary(before):
+            return {"ok": False, "outcome": "cp_logon_boundary_not_verified",
+                    "submitted": False, "snapshots": snapshots,
+                    "screen": before, "retry_performed": False,
+                    "cms_command_complete": None}
+        credentials = self.credential_provider.load()
+        self.secrets.update({credentials.userid, credentials.password})
+        if credentials.userid != "MAINT":
+            return {"ok": False, "outcome": "cp_logon_userid_not_maint",
+                    "submitted": False, "snapshots": snapshots,
+                    "screen": before, "retry_performed": False,
+                    "cms_command_complete": None}
+
+        self.command("MoveCursor(22,0)")
+        check = self.snapshot()
+        snapshots.append(check)
+        if (not self._cp_logon_boundary(check, require_cursor=True)
+                or host_display(check) != host_display(before)):
+            return {"ok": False, "outcome": "cp_logon_boundary_changed",
+                    "submitted": False, "snapshots": snapshots,
+                    "screen": check, "retry_performed": False,
+                    "cms_command_complete": None}
+
+        self.command('String("LOGON MAINT")')
+        self.command("Ascii")
+        self.command("Enter")
+        submitted = True
+        password_submitted = False
+        previous = check
+        while time.monotonic() < deadline:
+            remaining = max(1, min(3, int(deadline - time.monotonic())))
+            fresh = self._wait_output(remaining)
+            after = self.snapshot()
+            fresh = fresh or host_display(after) != host_display(previous)
+            previous = after
+            snapshots.append(after)
+            text = "\n".join(after["rows"]).upper()
+            if re.search(r"HCPLON\d+E|INVALID PASSWORD|INCORRECT PASSWORD|LOGON.*UNSUCCESSFUL", text):
+                return {"ok": False, "outcome": "login_rejected", "submitted": submitted,
+                        "password_submitted": password_submitted, "screen": after,
+                        "snapshots": snapshots, "retry_performed": False,
+                        "cms_command_complete": None}
+            if fresh and self._cp_password_prompt(after):
+                if password_submitted:
+                    return {"ok": False, "outcome": "cp_password_reprompted",
+                            "submitted": submitted, "password_submitted": True,
+                            "screen": after, "snapshots": snapshots,
+                            "retry_performed": False, "cms_command_complete": None}
+                self.command("MoveCursor(22,0)")
+                password_check = self.snapshot()
+                snapshots.append(password_check)
+                if (not self._cp_password_prompt(password_check)
+                        or host_display(password_check) != host_display(after)):
+                    return {"ok": False, "outcome": "cp_password_boundary_changed",
+                            "submitted": submitted, "password_submitted": False,
+                            "screen": password_check, "snapshots": snapshots,
+                            "retry_performed": False, "cms_command_complete": None}
+                self.command('String("' + credentials.password + '")')
+                self.command("Ascii")
+                self.command("Enter")
+                password_submitted = True
+                previous = password_check
+                continue
+            if (fresh and after["state"] in {"cp_read", "vm_read", "cms_ready"}
+                    and re.search(r"\bRECONNECTED AT\b|\bLOGON AT\b", text)):
+                return {"ok": True, "outcome": after["state"] + "_observed",
+                        "submitted": submitted, "password_submitted": password_submitted,
+                        "screen": after, "snapshots": snapshots,
+                        "retry_performed": False,
+                        "guest_logon_observed": True, "cms_command_complete": None}
+            self.command("Ascii")
+        return {"ok": False, "outcome": "cp_logon_transition_timeout",
+                "submitted": submitted, "password_submitted": password_submitted,
+                "screen": previous, "snapshots": snapshots,
+                "retry_performed": False, "cms_command_complete": None}
 
     def _wait_output(self, seconds):
         try:
@@ -460,12 +674,23 @@ class Session:
                     self._wait_output(max(1, min(3, int(deadline - time.monotonic()))))
                     before = self.snapshot()
                     snapshots.append(before)
-                if before["state"] in {"cms_ready", "cp_read", "vm_read"}:
+                if before["state"] in {"cms_ready", "vm_read"}:
                     return {"outcome": "existing_session_observed", "submitted": False,
                             "screen": before, "cms_command_complete": None}
+                if before["state"] == "cp_read":
+                    if re.search(r"\bRECONNECTED AT\b|\bLOGON AT\b",
+                                 "\n".join(before["rows"]), re.I):
+                        return {"outcome": "existing_session_observed", "submitted": False,
+                                "screen": before, "cms_command_complete": None}
+                    return self._cp_logon_maint(before, deadline)
                 self._login_layout(before)
-                # Reject an existing user/command input instead of clearing it.
-                if before["rows"][19][16:24].strip() or ("".join(before["rows"])[1776:1899]).strip():
+                # Reject existing form input using the field state captured
+                # before screen sanitization. A prior login can leave secrets
+                # in this session's redactor, which masks every editable field
+                # in public screen rows even when those fields are empty.
+                editable = {field["row"]: field for field in before["fields"]
+                            if not field["protected"]}
+                if any(not editable[row]["empty"] for row in (20, 21, 23)):
                     raise RuntimeError("Login form contains existing input; refusing to replace it")
                 credentials = self.credential_provider.load()
                 self.secrets.update({credentials.userid, credentials.password})
@@ -508,13 +733,15 @@ class Session:
                         "screen": self.last_screen, "snapshots": snapshots, "retry_performed": False}
             return self._run("login", work, timeout + 2)
 
-    def startup(self, timeout=30, verify_cms=False):
-        """Continue only the recorded logon/startup read, never arbitrary VM READ."""
+    def startup(self, timeout=30, verify_cms=False, begin_vm=False):
+        """Continue a verified startup read with one blank Enter or explicit VM begin."""
         with self.lock:
             if not self.allow_startup:
                 return {"ok": False, "message": "Startup continuation requires --allow-startup"}
             if type(timeout) is not int or not 1 <= timeout <= 45:
                 return {"ok": False, "message": "Startup timeout must be 1..45 seconds"}
+            if type(begin_vm) is not bool:
+                return {"ok": False, "message": "begin_vm must be boolean"}
 
             def work():
                 if self.em is None:
@@ -523,23 +750,33 @@ class Session:
                 current = self.snapshot()
                 snapshots = [current]
                 actions = []
+                if self._runner_protocol_visible(current):
+                    return {"ok": False, "outcome": "startup_runner_protocol_visible",
+                            "screen": current, "snapshots": snapshots, "actions": actions,
+                            "cms_command_complete": None}
                 if current["state"] == "cms_ready":
                     return {"outcome": "cms_ready_already_observed", "screen": current,
                             "actions": [], "cms_command_complete": None}
                 while time.monotonic() < deadline:
                     state = current["state"]
+                    if begin_vm and state != "vm_read":
+                        return {"ok": False, "outcome": "vm_begin_requires_vm_read",
+                                "screen": current, "actions": actions, "snapshots": snapshots,
+                                "cms_command_complete": None}
                     if state in {'more', 'holding'}:
                         return {'ok': False, 'outcome': 'startup_page_hold_observed',
                                 'screen': current, 'actions': actions, 'snapshots': snapshots,
                                 'cms_command_complete': None}
                     rows = "\n".join(current["rows"]).upper()
                     fields = [f for f in current["fields"] if not f["protected"]]
+                    logon_marker = re.search(r"\bLOGON AT\b|\bRECONNECTED AT\b", rows)
+                    blank_vm_read = self._blank_vm_read_input(current)
                     if (state not in {"vm_read", "cp_read"}
                             or not current["connected"] or current["field_layout_error"] is not None
                             or current["keyboard"] != "U" or len(fields) != 1
                             or (fields[0]["row"], fields[0]["column"], fields[0]["length"]) != (23, 1, 139)
                             or fields[0]["nondisplay"] or not fields[0]["empty"]
-                            or not re.search(r"\bLOGON AT\b|\bRECONNECTED\b", rows)):
+                            or not logon_marker and not blank_vm_read):
                         return {"ok": False, "outcome": "startup_boundary_not_verified", "screen": current,
                                 "snapshots": snapshots, "actions": actions, "cms_command_complete": None}
                     # The single, blank CMS startup input is established from the
@@ -547,6 +784,10 @@ class Session:
                     self.command("MoveCursor(22,0)")
                     check = self.snapshot()
                     snapshots.append(check)
+                    if self._runner_protocol_visible(check):
+                        return {"ok": False, "outcome": "startup_runner_protocol_visible",
+                                "screen": check, "snapshots": snapshots, "actions": actions,
+                                "cms_command_complete": None}
                     target = [f for f in check["fields"] if not f["protected"]]
                     if (check['state'] == 'cms_ready' and self.runner.input_field(check)
                             and host_display(check) != host_display(current)):
@@ -563,11 +804,36 @@ class Session:
                                 'screen': check, 'actions': actions, 'snapshots': snapshots,
                                 'cms_command_complete': None}
                     if (check["state"] != state or check["cursor"] != {"row": 23, "column": 1, "protected": False}
-                            or target != fields):
+                            or target != fields
+                            or blank_vm_read and (not self._blank_vm_read_input(check)
+                                                  or host_display(check) != host_display(current))
+                            or begin_vm and host_display(check) != host_display(current)):
                         raise RuntimeError("Startup field changed before input; continuation aborted")
                     if state == "cp_read":
                         self.command('String("BEGIN")')
                         actions.append("BEGIN")
+                    elif begin_vm:
+                        self.command('String("b")')
+                        typed = self.snapshot(_expected_input="b")
+                        input_matches = typed.pop("_expected_input_matches", False)
+                        snapshots.append(typed)
+                        if self._runner_protocol_visible(typed):
+                            return {"ok": False, "outcome": "startup_runner_protocol_visible",
+                                    "screen": typed, "snapshots": snapshots, "actions": actions,
+                                    "cms_command_complete": None}
+                        typed_fields = [f for f in typed["fields"] if not f["protected"]]
+                        if (typed["state"] != "vm_read" or typed["keyboard"] != "U"
+                                or typed["field_layout_error"] is not None or len(typed_fields) != 1
+                                or (typed_fields[0]["row"], typed_fields[0]["column"], typed_fields[0]["length"])
+                                    != (23, 1, 139)
+                                or typed_fields[0]["nondisplay"] or typed_fields[0]["empty"]
+                                or not input_matches
+                                or typed["cursor"] != {"row": 23, "column": 2, "protected": False}
+                                or host_display(typed) != host_display(check)):
+                            return {"ok": False, "outcome": "vm_begin_input_not_verified",
+                                    "screen": typed, "actions": actions, "snapshots": snapshots,
+                                    "cms_command_complete": None}
+                        actions.append("b")
                     self.command("Ascii")
                     self.command("Enter")
                     actions.append("Enter")
@@ -676,6 +942,86 @@ class Session:
             self.runner.verified = False
             return {"ok": True, "connected": False, "terminated": existed}
 
+    @staticmethod
+    def _hx_read_boundary(screen, staged_hx=False):
+        rows = screen.get("rows", [])
+        fields = [field for field in screen.get("fields", []) if not field["protected"]]
+        return (screen.get("connected") and screen.get("keyboard") == "U"
+                and screen.get("state") == "vm_read"
+                and screen.get("screen_kind") == "zvm_guest_banner"
+                and screen.get("field_layout_error") is None
+                and len(rows) == ROWS and "VM READ" in rows[-1].upper()
+                and "CP READ" not in rows[-1].upper()
+                and re.search(r"\bRECONNECTED AT\b", "\n".join(rows), re.I)
+                and len(fields) == 1
+                and (fields[0]["row"], fields[0]["column"], fields[0]["length"],
+                     fields[0]["nondisplay"], fields[0]["empty"])
+                    == (23, 1, 139, False, not staged_hx)
+                and screen.get("cursor") == {"row": 23, "column": 3 if staged_hx else 1,
+                                               "protected": False})
+
+    def abort_read(self, timeout=15):
+        """Send only HX+Enter at the exact reconnect VM READ boundary.
+
+        HX intentionally abends the waiting EXEC, so CMS Ready may carry a
+        nonzero return code. Completion here means fresh Ready plus the runner
+        input field, not a successful command return code.
+        """
+        with self.lock:
+            if not self.allow_hx:
+                return {"ok": False, "message": "HX recovery requires --allow-hx"}
+            if type(timeout) is not int or not 1 <= timeout <= 30:
+                return {"ok": False, "message": "HX recovery timeout must be 1..30 seconds"}
+            if self.em is None:
+                return {"ok": False, "message": "Connect and inspect the VM READ screen first"}
+
+            def work():
+                before = self.snapshot()
+                staged_hx = (self._hx_read_boundary(before, staged_hx=True)
+                             and before.get("_expected_input_matches"))
+                if staged_hx:
+                    typed = before
+                    actions = ["HX (already verified in input field)"]
+                elif not self._hx_read_boundary(before):
+                    return {"ok": False, "outcome": "hx_boundary_not_verified",
+                            "screen": before, "actions": [], "cms_command_complete": None}
+                else:
+                    self.command("MoveCursor(22,0)")
+                    check = self.snapshot()
+                    if (not self._hx_read_boundary(check)
+                            or host_display(check) != host_display(before)):
+                        return {"ok": False, "outcome": "hx_boundary_changed",
+                                "screen": check, "actions": [], "cms_command_complete": None}
+                    self.command('String("HX")')
+                    typed = self.snapshot(_expected_input="HX")
+                    if (not self._hx_read_boundary(typed, staged_hx=True)
+                            or not typed.get("_expected_input_matches")
+                            or host_display(typed) != host_display(check)):
+                        return {"ok": False, "outcome": "hx_input_not_verified",
+                                "screen": typed, "actions": [], "cms_command_complete": None}
+                    actions = ["HX"]
+                self.command("Ascii")
+                self.command("Enter")
+                deadline = time.monotonic() + timeout
+                previous = typed
+                while time.monotonic() < deadline:
+                    self._wait_output(1)
+                    after = self.snapshot()
+                    ready = [ready_rc(row) for row in after["rows"] if ready_rc(row) is not None]
+                    if (host_display(after) != host_display(previous)
+                            and after["state"] == "cms_ready"
+                            and ready
+                            and self.runner.input_field(after)):
+                        self.capture_token = None
+                        self._protocol_rows = []
+                        return {"outcome": "hx_recovery_ready_observed", "actions": actions + ["Enter"],
+                                "cms_ready_return_code": ready[-1], "cms_command_complete": None,
+                                "screen": after}
+                    previous = after
+                raise TimeoutError("HX was submitted, but fresh CMS Ready was not observed")
+
+            return self._run("abort_read", work, timeout + 2)
+
 
 def create_server(session):
     from contextlib import asynccontextmanager
@@ -709,7 +1055,7 @@ def create_server(session):
 
     @server.tool()
     def cms_status() -> dict:
-        """Observe logo/login/password/CP READ/VM READ/CMS Ready/MORE/HOLDING/XEDIT/unknown; no completion claim."""
+        """Observe logo/login/password/CP READ/VM READ/running/CMS Ready/MORE/HOLDING/XEDIT/unknown; no completion claim."""
         return session.status()
 
     @server.tool()
@@ -727,25 +1073,42 @@ def create_server(session):
 
     @server.tool()
     def cms_login(timeout: int = 30) -> dict:
-        """Submit locally sourced credentials once into the verified combined login form.
+        """Perform one locally credentialed login through a verified guest form or CP MAINT menu.
 
         Requires --allow-login and --credential-file. Takes no credential arguments.
-        Does not send CMS commands, BEGIN, Clear, retries, or transfers. CP/VM READ,
-        MORE/HOLDING or rejection stops the flow; readiness never proves command RC.
+        The CP route accepts only the exact command menu or Hercules CP READ banner
+        and userid MAINT, sends LOGON MAINT once, and responds once only to a
+        verified nondisplay password field. No retries, Clear, BEGIN, CMS commands
+        or transfers.
         """
         return session.login(timeout)
 
     @server.tool()
-    def cms_startup(timeout: int = 30, verify_cms: bool = False) -> dict:
-        """Continue verified blank logon VM READ with one Enter; CP READ may require BEGIN.
+    def cms_startup(timeout: int = 30, verify_cms: bool = False,
+                    begin_vm: bool = False) -> dict:
+        """Continue verified startup with one Enter, CP BEGIN, or explicit VM b.
 
         Requires --allow-startup. Verifies startup provenance and exact field
-        layout. Never clears input, repeats keys blindly, runs arbitrary commands or
+        layout. Normally sends one blank Enter at VM READ, or BEGIN and Enter at
+        CP READ. begin_vm=True instead types exactly lowercase b at an empty VM
+        READ field, verifies that one-character input, then presses Enter once.
+        Never clears input, repeats keys blindly, runs arbitrary commands or
         transfers files. Returns CMS Ready only after fresh host output.
         verify_cms=True authorizes one fixed read-only QUERY CMSLEVEL probe if
         the recorded blank CMS prompt follows startup without a Ready message.
         """
-        return session.startup(timeout, verify_cms)
+        return session.startup(timeout, verify_cms, begin_vm)
+
+    @server.tool()
+    def cms_abort_read(timeout: int = 15) -> dict:
+        """Send exactly HX then Enter at a verified, empty reconnect VM READ field.
+
+        Requires --allow-hx and the exact fresh z/VM 6.3 RECONNECTED banner,
+        VM READ footer, row-23 empty input field and cursor position. Generic
+        terminal input stays disabled. HX abends the waiting EXEC, so Ready may
+        carry a nonzero code; the tool requires fresh Ready and the runner field.
+        """
+        return session.abort_read(timeout)
 
     @server.tool()
     def cms_prepare_runner(create: bool = False) -> dict:
@@ -765,11 +1128,25 @@ def create_server(session):
         Requires --allow-commands and a source-verified runner. --allow-arbitrary-commands
         removes the read-only allowlist while retaining one-line printable input,
         complete nonce-correlated output, byte counts, checksums, acknowledgements
-        and actual CMS return codes. The wrapper reserves | and # for capture
+        and actual CMS return codes (with explicit timeout up to 900 seconds).
+        The wrapper reserves | and # for capture
         framing; interactive/full-screen commands cannot return a complete result.
         """
         with session.lock:
             return session.runner.run(command, timeout)
+
+    @server.tool()
+    def cms_resolve_failed_capture(token: str,
+                                   resume_arbitrary_commands: bool = False) -> dict:
+        """Resolve one exact visible F 0 ACK / Ready(12) capture failure.
+
+        This sends no CMS input and never reconstructs or completes the failed
+        output. By default, the next command calls remain read-only until this
+        operation is explicitly repeated with resume_arbitrary_commands=true.
+        Arbitrary resumption requires --allow-arbitrary-commands at server start.
+        """
+        with session.lock:
+            return session.runner.resolve_failed_capture(token, resume_arbitrary_commands)
 
     @server.tool()
     def cms_query_links(vaddr: str, timeout: int = 120) -> dict:
@@ -879,6 +1256,7 @@ def main():
     parser.add_argument("--allow-input", action="store_true", help="Enable explicitly authorized terminal input")
     parser.add_argument("--allow-login", action="store_true", help="Enable one-shot local-credential login only")
     parser.add_argument("--allow-startup", action="store_true", help="Enable verified logon/startup continuation only")
+    parser.add_argument("--allow-hx", action="store_true", help="Enable exact HX+Enter recovery at verified reconnect VM READ only")
     parser.add_argument("--credential-file", help="Path to owner-only JSON credentials; no values in MCP arguments")
     parser.add_argument("--allow-commands", action="store_true", help="Enable correlated CMS command capture")
     parser.add_argument("--allow-arbitrary-commands", action="store_true",
@@ -906,7 +1284,8 @@ def main():
         parser.error("--allow-uploads requires --upload-root")
     session = Session(allow_input=args.allow_input, allow_login=args.allow_login,
                       credential_provider=FileCredentialProvider(args.credential_file) if args.credential_file else None,
-                      allow_startup=args.allow_startup, allow_commands=args.allow_commands, runner_name=args.runner_name,
+                      allow_startup=args.allow_startup, allow_hx=args.allow_hx,
+                      allow_commands=args.allow_commands, runner_name=args.runner_name,
                       allow_arbitrary_commands=args.allow_arbitrary_commands,
                       allow_downloads=args.allow_downloads, download_root=args.download_root,
                       allow_uploads=args.allow_uploads, upload_root=args.upload_root,

@@ -66,16 +66,18 @@ class CompilerObservationTests(unittest.TestCase):
         self.assertEqual(fake.calls.count('Clear'), 1)
         session.disconnect()
 
-    def test_missing_new_ready_fails_and_terminates_without_retry(self):
+    def test_missing_new_ready_fails_and_preserves_readable_session_without_retry(self):
         fake = CommandEmulator()
         session = Session(factory=lambda: fake, allow_commands=True)
         session.connect('0200@')
         session.runner._simple = Mock(side_effect=TimeoutError('No correlated Ready'))
         result = observe(session, 'disks')
         self.assertFalse(result['ok'])
-        self.assertTrue(result['session_terminated'])
+        self.assertTrue(result['session_preserved'])
+        self.assertFalse(result['session_terminated'])
         session.runner._simple.assert_called_once()
-        self.assertIsNone(session.em)
+        self.assertIsNotNone(session.em)
+        self.assertFalse(fake.closed)
 
     def test_repeated_held_page_receives_one_clear_and_partial_page_has_no_rc(self):
         class RepeatedPage(CommandEmulator):

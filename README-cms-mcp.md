@@ -1,6 +1,6 @@
 # Local IBM z/VM CMS MCP server
 
-This version provides sixteen tools, including login, startup, arbitrary
+This version provides 18 tools, including login, startup, arbitrary
 correlated CMS command capture, source downloads, general file uploads and local
 edit/review plans, over
 stdio, using one dedicated persistent s3270 process through py3270. It never
@@ -56,10 +56,12 @@ guest login are separate checks. No terminal groups are created by this tooling.
 | `cms_screen()` | Atomic saved screen: 24 rows of 80 characters, 1-based cursor, keyboard/format status and field metadata. |
 | `cms_status()` | Disconnected status or a fresh screen with heuristic state classification. |
 | `cms_send(action, …)` | One validated terminal action; disabled in the initial registration. |
-| `cms_login(timeout=30)` | Submit local credentials once into the verified combined form; separate `--allow-login` flag required. |
-| `cms_startup(timeout=30, verify_cms=False)` | Continue verified startup; optional fixed read-only CMS verification; requires `--allow-startup`. |
+| `cms_login(timeout=30)` | One-shot local-credential login through the verified combined guest form or exact CP command menu for MAINT; separate `--allow-login` flag required. |
+| `cms_startup(timeout=30, verify_cms=False, begin_vm=False)` | Continue verified startup; `begin_vm=True` sends one lowercase `b` at the exact empty VM READ field; optional fixed read-only CMS verification. Requires `--allow-startup`. |
+| `cms_abort_read(timeout=15)` | Send HX and Enter only at the verified empty reconnect VM READ field; requires `--allow-hx`. |
 | `cms_prepare_runner(create=False)` | Verify a configured helper, or explicitly create one new unique EXEC when create=true. |
-| `cms_command(command, timeout=120)` | Run one CMS command through the correlated runner and return complete native output plus the actual CMS-stage RC. Arbitrary mode has a 108-character limit and reserves `|` and `#` for framing. |
+| `cms_command(command, timeout=120)` | Run one CMS command through the correlated runner and return complete native output plus the actual CMS-stage RC. Explicit timeout may be up to 900 seconds. Arbitrary mode has a 108-character limit and reserves `|` and `#` for framing. |
+| `cms_resolve_failed_capture(token, resume_arbitrary_commands=False)` | Acknowledge only a stable `F 0 ACK` frame followed by `Ready(12)`. It sends no CMS input, marks the old result incomplete, and defaults subsequent calls to the read-only allowlist. Repeating it with `resume_arbitrary_commands=true` restores the configured command scope. |
 | `cms_query_links(vaddr, timeout=120)` | Submit only the fixed `CP QUERY LINKS` command for one three-digit virtual address through the observed CMS input field; captures pages until a fresh Ready prompt. |
 | `cms_download(filename, filetype, filemode, create_runner=False, timeout=300)` | Capture native file records twice, verify CMS metadata, and save a new snapshot in the configured local Git worktree. |
 | `cms_edit_prepare(snapshot)` | Validate a local snapshot and create a separate working copy with pinned original bytes and metadata. |
@@ -77,8 +79,14 @@ are masked position-for-position. After String input, unprotected fields are als
 masked to cover partial input on a failed action. If field parsing fails, the screen is fully
 masked and the error is exposed, rather than risking credential disclosure.
 
-States are `logo`, `login`, `password`, `cp_read`, `vm_read`, `cms_ready`, `more`, `holding`,
-`xedit`, and `unknown`. Classification is heuristic: a Ready prompt may be stale.
+States are `logo`, `login`, `password`, `cp_read`, `vm_read`, `vm_running`,
+`cms_ready`, `more`, `holding`, `xedit`, and `unknown`. A z/VM 6.3 reconnect
+screen with `RUNNING`, an unlocked keyboard, and the exact empty CMS command
+field is classified as `cms_ready`; `VM READ` remains a separate program-input
+state. A preliminary `vm_running` classification is retained when there is not
+enough guest/input-field evidence. Classification is heuristic and does not
+establish command completion. `screen_kind` distinguishes the Hercules emulator
+banner from a z/VM guest login/reconnect banner.
 Screen/status observations leave `cms_command_complete` null. A successful
 `cms_command` sets it true only after verified capture and a fresh wrapper Ready.
 
@@ -93,9 +101,13 @@ The `wait` option is `none` or `output`; `output` uses bounded
 `Wait(timeout,Output)`, armed by an ASCII read before the action. Host output is
 not proof of command completion. `aidWait=false` avoids relying on unlock for
 action synchronization. Pipe reads also have deadlines. A failed/ambiguous
-operation is not retried; the process is terminated and sanitized screen,
-operation trace, error and stderr evidence are returned. A timeout may leave only
-the last successfully captured screen available. Explicit reconnection is needed.
+operation is never retried. The server makes one bounded fresh-screen attempt to
+resynchronize; if it confirms the terminal is connected, the same s3270 session
+is kept open and the error includes the sanitized screen, trace and stderr. The
+session is terminated only if s3270 has exited or a complete connected screen
+cannot be recovered. A preserved session may still have a helper waiting for
+input or acknowledgement; use `cms_resolve_failed_capture` only when its exact
+failed-frame and Ready boundary are visible before another command.
 
 Avoid `Snap(Wait,...,Output)` with the installed s3270 4.5ga6: a live passive
 observation triggered SIGSEGV in its `snap_save` / `set_output_needed` path on
@@ -126,13 +138,19 @@ pipeline constants can be imported once with `--import-legacy cms_pipeline.py`;
 the importer uses AST constants and never executes the pipeline. The original
 legacy file is preserved and still contains its pre-existing credentials.
 
-`cms_login` verifies the established editable fields and nondisplay password
-attribute, refuses existing/modified input, checks the target cursor before each
-String, and sends Enter only once. It never sends a LOGON command, BEGIN, Clear,
-file transfers or CMS commands. It stops on rejection, CP READ, CMS Ready,
-MORE/HOLDING, or a bounded timeout. CP READ does not mean CMS is ready. General
-`cms_send` stays disabled unless separately authorized and enabled. VM READ is
-also a stopping state; it is distinct from CMS Ready and does not trigger Enter.
+`cms_login` supports two bounded paths. The combined guest form path verifies its
+established userid/password fields and nondisplay password attribute. The CP path
+accepts only the observed `Enter one of the following commands` menu or the
+observed Hercules banner with CP READ, exact row-23 input geometry, and a local
+credential userid of `MAINT`; it submits `LOGON MAINT` once. If CP then presents
+an exact empty nondisplay password field
+at that same input geometry, it submits the local password once as part of that
+login. It never retries or sends other CP commands. Both paths recheck the screen
+and cursor before input, stop on rejection or unexpected transitions, and do not
+send BEGIN, Clear, transfers or CMS commands. CP/VM READ does not mean CMS is
+ready. A separate `cms_startup` call may send one input only after its exact
+startup boundary is verified. General `cms_send` remains disabled unless
+separately authorized and enabled.
 
 Never authorize a command that erases/replaces files implicitly. In particular,
 the old inventory pipeline's `LISTFILE (EXEC` replaces `CMS EXEC A`. This server
@@ -197,7 +215,7 @@ verification; the earlier live workflow review artifacts remain in `cms-sources`
 
 Unit tests use synthetic/recorded screens, a fake emulator, and one disconnected
 local s3270 process. Protocol validation initializes the real MCP stdio server,
-checks all fifteen tools and verifies that input/login/startup/commands/link
+checks all 18 tools and verifies that input/login/startup/commands/link
 queries/downloads, local edits and create-only upload remain disabled by default. Codex
 discovery validation uses `codex app-server` catalog discovery without a model
 turn or any terminal connection. It may require local sandbox approval.
@@ -305,16 +323,19 @@ The original result is preserved in `cms-login-evidence.json`. CMS Ready has not
 been established. The next stage needs an authorized continuation of the startup
 prompt before implementing correlated CMS command output and return codes.
 
-`cms_startup` is separately enabled and accepts no command text. It requires the
-recorded logon/reconnect marker, exact 139-character input at row 23 column 1,
-an unlocked keyboard, a visible input field, and an empty field. It verifies the
-cursor and field again before input. It sends one Enter at VM READ, or BEGIN
-and Enter at CP READ, at most once per state in a call. It does not clear any
-input or perform paging. The recorded blank reconnect boundary after our own
-BEGIN may also require an Enter even while the terminal says RUNNING; unrelated
-RUNNING/application screens are refused. A Ready observation after fresh host output is distinct
-from verifying a CMS command return code. Use `--startup` with the live-login
-validator only when this continuation is authorized.
+`cms_startup` is separately enabled and accepts no arbitrary command text. It
+requires a verified CP/VM READ state and exact empty 139-character input at row
+23, column 1, with the recorded logon/reconnect marker or exact startup banner.
+It verifies the cursor and field again before input. It sends one Enter at a
+verified VM READ, lowercase `b` plus Enter only when explicitly requested with
+`begin_vm=True`, or BEGIN plus Enter at CP READ, at most once per call. The `b`
+path verifies the character using an internal boolean comparison against the
+raw screen buffer; neither the value nor raw buffer is returned in diagnostics.
+It does not clear input or perform paging. A z/VM reconnect `RUNNING` screen
+with the exact empty CMS command field is already command-ready and does not
+trigger startup input. The fixed CMSLEVEL probe remains limited to its
+previously verified startup boundary. A Ready observation after fresh host
+output is distinct from verifying a CMS command return code.
 
 The successful fixed `QUERY CMSLEVEL` diagnostic returned `CMS Level 27, Service
 Level 1302` followed by a new `Ready;` prompt. See
@@ -378,12 +399,15 @@ No host output files are created. On MORE/HOLDING the driver captures the curren
 frame and advances paging under protocol control; there are no timed scrolling
 loops. Captures exceeding 4096 records, 4096 bytes per record or 1 MiB total fail
 explicitly. Missing, conflicting, truncated, reordered or checksum-invalid frames
-cannot produce `output_complete=true`. A timeout terminates the local terminal;
-the helper may still be waiting for acknowledgement on the guest. Such an
-interrupted helper is not treated as a shell and is not retried automatically.
+cannot produce `output_complete=true`. After a timeout, a connected and readable
+terminal is kept open even if the helper may still be waiting for acknowledgement
+on the guest. Such an interrupted helper is not treated as a shell and is not
+retried automatically.
 
-The default command timeout is 120 seconds (maximum 300); the Codex tool timeout
-must accommodate that bound. Live validation is explicit:
+The default command timeout is 120 seconds; explicit command captures can run up
+to 900 seconds for slow CMS Git gates. The Codex tool timeout must accommodate
+the requested bound. A timeout still leaves the result incomplete and requires
+failed-capture reconciliation before another command. Live validation is explicit:
 
 ```sh
 .venv/bin/python -B validate_cms_commands.py --live --create-runner --credential-file ~/.config/ibm-cms/credentials.json --output cms-command-evidence.json
@@ -596,7 +620,7 @@ candidate, and `--expected-source` for an exact local fixed-80 source comparison
 virtual DASD, current 0600 location, MAINT/0600 directory location, real 0127
 volume links, and CMS QUERY DISK. No generic command tool is added. This local
 validator uses the explicit link-observation capability; normal MCP defaults
-and its fifteen-tool catalog are unchanged.
+and its 18-tool catalog are unchanged.
 
 The separate explicit `--access-existing-g` option may issue exactly
 `ACCESS 600 G`, never LINK, FORMAT, RELEASE, replacement or erasure. It refuses

@@ -6,6 +6,7 @@ import types
 import unittest
 import queue
 import ast
+import re
 from pathlib import Path
 import subprocess
 import sys
@@ -13,6 +14,7 @@ from test_cms_fixtures import recorded_screen
 
 from cms_mcp import (Session, PipeApp, Emulator, classify, field_layout,
                      sanitize_rows, create_server)
+from validate_cms_mcp import EXPECTED
 
 
 def screen(text="Ready;", bottom=""):
@@ -87,6 +89,41 @@ class ClassificationTests(unittest.TestCase):
         self.assertTrue(all(f["protected"] for f in captured["fields"]))
         self.assertEqual(captured["cursor"], {"row": 1, "column": 1, "protected": True})
 
+    def test_zvm_guest_reconnect_banner_is_distinct_from_hercules_console(self):
+        rows = [" " * 80 for _ in range(24)]
+        rows[1] = "15:40:37 z/VM Version 6 Release 3.0, Service Level 1302".ljust(80)
+        rows[5] = "15:40:37 RECONNECTED AT 15:40:37 EST SATURDAY 10/17/26".ljust(80)
+        rows[23] = ("VM READ" + " " * 133).ljust(80)
+        result = classify(rows)
+        self.assertEqual(result["state"], "vm_read")
+        self.assertEqual(result["screen_kind"], "zvm_guest_banner")
+
+    def test_hercules_running_banner_is_observational_vm_running(self):
+        rows = [" " * 80 for _ in range(24)]
+        rows[0] = "Hercules Version  : 4.7.0".ljust(80)
+        rows[23] = "RUNNING   ********".ljust(80)
+        result = classify(rows)
+        self.assertEqual(result["state"], "vm_running")
+        self.assertEqual(result["screen_kind"], "hercules_banner")
+
+    def test_stale_password_banner_with_exact_guest_vm_read_refines_to_startup(self):
+        rows = screen()
+        rows[0] = "Hercules Version  : 4.7.0".ljust(80)
+        rows[7] = "ENTER PASSWORD (IT WILL NOT APPEAR WHEN TYPED):".ljust(80)
+        rows[13] = "LOGON AT 15:11:45 EST SATURDAY 10/17/26".ljust(80)
+        rows[23] = (" " * 60 + "VM READ VMACCOUNT").ljust(80)
+        fake = FakeEmulator(rows)
+        fake.buffer = buffer({0: "20", 1759: "00", 1899: "20", 1919: "20"})
+        fake.cursor = (22, 0)
+        session = Session(factory=lambda: fake)
+        result = session.connect("auto")["screen"]
+        self.assertEqual(result["state"], "vm_read")
+        self.assertIn("vm_read", result["indicators"])
+        editable = [field for field in result["fields"] if not field["protected"]]
+        self.assertEqual(len(editable), 1)
+        self.assertTrue(editable[0]["empty"])
+        self.assertNotIn("VMACCOUNT", json.dumps(result))
+
 
 class CapturedLoginTests(unittest.TestCase):
     def test_combined_login_form_is_not_password_prompt(self):
@@ -113,6 +150,15 @@ class RedactionTests(unittest.TestCase):
         safe = sanitize_rows(rows, field_layout(buffer()), set())
         self.assertIn("CP READ", safe[23])
         self.assertIn("*********", safe[23])
+        self.assertNotIn("VMACCOUNT", json.dumps(safe))
+
+    def test_vm_read_and_running_identifiers_are_masked(self):
+        rows = screen()
+        rows[22] = "VM READ VMACCOUNT".ljust(80)
+        rows[23] = "RUNNING VMACCOUNT".ljust(80)
+        safe = sanitize_rows(rows, field_layout(buffer()), set())
+        self.assertIn("VM READ", safe[22])
+        self.assertIn("RUNNING", safe[23])
         self.assertNotIn("VMACCOUNT", json.dumps(safe))
 
     def test_attributes_and_wrapped_field(self):
@@ -175,7 +221,7 @@ class SessionTests(unittest.TestCase):
         cp_read = self.startup_fixture("cp_read")
         blank = self.startup_fixture("unknown")
         blank["rows"][6] = "BEGIN".ljust(80)
-        blank["rows"][23] = "RUNNING TACOTICO".ljust(80)
+        blank["rows"][23] = "RUNNING ********".ljust(80)
         screens = iter([cp_read, cp_read, blank])
         calls = []
         session.snapshot = lambda: next(screens)
@@ -252,9 +298,10 @@ class SessionTests(unittest.TestCase):
         self.assertFalse(result["ok"])
         self.assertIn("terminal selector 0200@", result["message"])
         self.assertIn("Connection rejected", result["last_screen"]["rows"][0])
-        self.assertTrue(result["session_terminated"])
-        self.assertTrue(fake.closed)
-        self.assertIsNone(session.em)
+        self.assertTrue(result["session_preserved"])
+        self.assertFalse(result["session_terminated"])
+        self.assertFalse(fake.closed)
+        self.assertIsNotNone(session.em)
         self.assertFalse(any(action.startswith(("String", "Enter", "Clear"))
                              for action in fake.calls))
 
@@ -314,16 +361,19 @@ class SessionTests(unittest.TestCase):
         fake.rows = screen('secret"value')
         self.assertNotIn('secret\\"value', json.dumps(session.screen()))
 
-    def test_deadline_preserves_screen_and_terminates(self):
+    def test_deadline_preserves_connected_screen_and_session(self):
         session, fake = self.make_session()
         session.connect("0200@")
         fake.fail_action = "Enter"
         result = session.send("Enter")
         self.assertFalse(result["ok"])
         self.assertEqual(len(result["last_screen"]["rows"]), 24)
-        self.assertEqual(result["trace"][-1]["error_type"], "TimeoutError")
-        self.assertTrue(fake.closed)
-        self.assertIsNone(session.em)
+        self.assertEqual(result["error_type"], "TimeoutError")
+        self.assertTrue(any(item.get("error_type") == "TimeoutError" for item in result["trace"]))
+        self.assertTrue(result["session_preserved"])
+        self.assertFalse(result["session_terminated"])
+        self.assertFalse(fake.closed)
+        self.assertIsNotNone(session.em)
 
     def test_buffer_deadline_is_not_hidden(self):
         session, fake = self.make_session()
@@ -383,6 +433,13 @@ class SessionTests(unittest.TestCase):
 
 
 class ValidatorTests(unittest.TestCase):
+    def test_operator_guide_tool_inventory_matches_protocol(self):
+        guide = Path(__file__).with_name("README-cms-mcp.md").read_text()
+        documented = set(re.findall(r'^\| `(cms_[^(`]+)', guide, re.MULTILINE))
+        self.assertEqual(documented, EXPECTED)
+        self.assertIn(f"provides {len(EXPECTED)} tools", guide)
+        self.assertIn(f"checks all {len(EXPECTED)} tools", guide)
+
     def test_validators_have_no_optimization_dependent_checks(self):
         for path in Path(__file__).parent.glob('validate_cms_*.py'):
             with self.subTest(validator=path.name):

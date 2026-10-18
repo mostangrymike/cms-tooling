@@ -1,4 +1,5 @@
 """Offline tests for the fixed-command, direct-screen CP QUERY LINKS tool."""
+import argparse
 import unittest
 import copy
 from unittest.mock import Mock
@@ -6,7 +7,7 @@ from unittest.mock import Mock
 from cms_link_query import LinkQuery, link_query_command
 from cms_mcp import Session
 from test_cms_mcp import FakeEmulator, buffer, screen
-from validate_cms_gdisk import access_gate
+from validate_cms_gdisk import access_gate, validate_runner_name
 
 
 class PagingEmulator(FakeEmulator):
@@ -53,7 +54,46 @@ class PagingEmulator(FakeEmulator):
         assert self.queued == "CP QUERY LINKS 191", self.queued
 
 
+class RunningBetweenPages(PagingEmulator):
+    def __init__(self):
+        super().__init__()
+        self.stage = 0
+
+    @staticmethod
+    def running_screen():
+        rows = screen("", "")
+        rows[-1] = (" " * 60 + "RUNNING TACOTICO").ljust(80)
+        return rows
+
+    def exec_command(self, action):
+        from py3270 import CommandError
+        text = action.decode()
+        if text == "Clear" and self.stage == 0:
+            self.stage = 1
+            self.rows = self.running_screen()
+            return FakeEmulator.exec_command(self, action)
+        if text.startswith("Wait(") and self.stage == 1:
+            self.stage = 2
+            self.rows = screen("", "MORE...")
+            self.rows[8] = self.queued.ljust(80)
+            self.rows[9] = "USERB 0192 W".ljust(80)
+            return FakeEmulator.exec_command(self, action)
+        if text == "Clear" and self.stage == 2:
+            self.stage = 3
+            self.rows = self.running_screen()
+            return FakeEmulator.exec_command(self, action)
+        if text.startswith("Wait(") and self.stage == 3:
+            raise CommandError("Wait(): Timed out")
+        return super().exec_command(action)
+
+
 class LinkQueryTests(unittest.TestCase):
+    def test_access_validator_requires_a_source_verifiable_runner_name(self):
+        self.assertEqual(validate_runner_name('ZMA0B1E5'), 'ZMA0B1E5')
+        for value in ('ZM1234567', 'ZM123456; ERASE * * A', 'zmabcdef', 'ZM12345'):
+            with self.subTest(value=value), self.assertRaises(argparse.ArgumentTypeError):
+                validate_runner_name(value)
+
     def disk_observations(self):
         data = {
             'virtual': ['DASD 0600 3390 VMCOM1 R/W 1600 CYL ON DASD 0127 SUBCHANNEL = 001F'],
@@ -88,6 +128,22 @@ class LinkQueryTests(unittest.TestCase):
             result['output_rows'] = [row.replace('MAINT', '*****') for row in result['output_rows']]
         self.assertFalse(access_gate(data, {'MAINT'})['writer_exclusion_established'])
 
+    def test_existing_g_access_gate_reconstructs_timestamped_wrapped_virtual_listing(self):
+        data = self.disk_observations()
+        data['virtual']['output_rows'] = [
+            '16:54:40 DASD 0600 3390 VMCOM1 R/W       1600 CYL ON DASD  0127 SUBCHANNEL = 001',
+            'F']
+        for name in ('location', 'directory', 'volume'):
+            data[name]['output_rows'] = [
+                ('16:54:46 ' + row) if not row.startswith('16:54:46 ') else row
+                for row in data[name]['output_rows']]
+        data['volume']['output_rows'].insert(0, '16:54:46')
+        result = access_gate(data, set())
+        self.assertTrue(result['exact_virtual_geometry'])
+        self.assertTrue(result['current_and_directory_mapping_match'])
+        self.assertTrue(result['volume_links_match_documented_baseline'])
+        self.assertFalse(result['replacement_safe'])
+
     def test_command_accepts_only_a_three_digit_hex_address(self):
         self.assertEqual(link_query_command("19a"), "CP QUERY LINKS 19A")
         for value in ("*", "0191", "19", "191; CP IPL CMS", " cp query links 191 "):
@@ -120,6 +176,20 @@ class LinkQueryTests(unittest.TestCase):
         self.assertEqual(sum(call == "Enter" for call in fake.calls), 1)
         self.assertEqual(sum(call == "Clear" for call in fake.calls), 1)
         self.assertFalse(any("Transfer(" in call for call in fake.calls))
+        session.disconnect()
+
+    def test_running_redraw_between_pages_is_observed_until_stable_prompt(self):
+        fake = RunningBetweenPages()
+        session = Session(factory=lambda: fake, allow_query_links=True)
+        session.connect("0200@")
+        result = session.link_query.query("191", timeout=30)
+        self.assertTrue(result["ok"], result)
+        self.assertTrue(result["output_complete"])
+        self.assertEqual(result["completion_boundary"],
+                         "stable CMS RUNNING prompt after captured paging")
+        self.assertEqual(result["output_rows"], ["USERA 0191 W", "USERB 0192 W"])
+        self.assertEqual(sum(call == "Clear" for call in fake.calls), 2)
+        self.assertTrue(session.link_query.running_prompt_verified)
         session.disconnect()
 
     def test_unpaged_query_requires_echo_and_ready_after_output(self):
