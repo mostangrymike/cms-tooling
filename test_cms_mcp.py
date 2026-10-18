@@ -6,6 +6,7 @@ import types
 import unittest
 import queue
 import ast
+import re
 from pathlib import Path
 import subprocess
 import sys
@@ -13,6 +14,7 @@ from test_cms_fixtures import recorded_screen
 
 from cms_mcp import (Session, PipeApp, Emulator, classify, field_layout,
                      sanitize_rows, create_server)
+from validate_cms_mcp import EXPECTED
 
 
 def screen(text="Ready;", bottom=""):
@@ -431,6 +433,13 @@ class SessionTests(unittest.TestCase):
 
 
 class ValidatorTests(unittest.TestCase):
+    def test_operator_guide_tool_inventory_matches_protocol(self):
+        guide = Path(__file__).with_name("README-cms-mcp.md").read_text()
+        documented = set(re.findall(r'^\| `(cms_[^(`]+)', guide, re.MULTILINE))
+        self.assertEqual(documented, EXPECTED)
+        self.assertIn(f"provides {len(EXPECTED)} tools", guide)
+        self.assertIn(f"checks all {len(EXPECTED)} tools", guide)
+
     def test_validators_have_no_optimization_dependent_checks(self):
         for path in Path(__file__).parent.glob('validate_cms_*.py'):
             with self.subTest(validator=path.name):

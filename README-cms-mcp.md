@@ -1,6 +1,6 @@
 # Local IBM z/VM CMS MCP server
 
-This version provides sixteen tools, including login, startup, arbitrary
+This version provides 18 tools, including login, startup, arbitrary
 correlated CMS command capture, source downloads, general file uploads and local
 edit/review plans, over
 stdio, using one dedicated persistent s3270 process through py3270. It never
@@ -58,6 +58,7 @@ guest login are separate checks. No terminal groups are created by this tooling.
 | `cms_send(action, …)` | One validated terminal action; disabled in the initial registration. |
 | `cms_login(timeout=30)` | One-shot local-credential login through the verified combined guest form or exact CP command menu for MAINT; separate `--allow-login` flag required. |
 | `cms_startup(timeout=30, verify_cms=False, begin_vm=False)` | Continue verified startup; `begin_vm=True` sends one lowercase `b` at the exact empty VM READ field; optional fixed read-only CMS verification. Requires `--allow-startup`. |
+| `cms_abort_read(timeout=15)` | Send HX and Enter only at the verified empty reconnect VM READ field; requires `--allow-hx`. |
 | `cms_prepare_runner(create=False)` | Verify a configured helper, or explicitly create one new unique EXEC when create=true. |
 | `cms_command(command, timeout=120)` | Run one CMS command through the correlated runner and return complete native output plus the actual CMS-stage RC. Explicit timeout may be up to 900 seconds. Arbitrary mode has a 108-character limit and reserves `|` and `#` for framing. |
 | `cms_resolve_failed_capture(token, resume_arbitrary_commands=False)` | Acknowledge only a stable `F 0 ACK` frame followed by `Ready(12)`. It sends no CMS input, marks the old result incomplete, and defaults subsequent calls to the read-only allowlist. Repeating it with `resume_arbitrary_commands=true` restores the configured command scope. |
@@ -214,7 +215,7 @@ verification; the earlier live workflow review artifacts remain in `cms-sources`
 
 Unit tests use synthetic/recorded screens, a fake emulator, and one disconnected
 local s3270 process. Protocol validation initializes the real MCP stdio server,
-checks all fifteen tools and verifies that input/login/startup/commands/link
+checks all 18 tools and verifies that input/login/startup/commands/link
 queries/downloads, local edits and create-only upload remain disabled by default. Codex
 discovery validation uses `codex app-server` catalog discovery without a model
 turn or any terminal connection. It may require local sandbox approval.
@@ -619,7 +620,7 @@ candidate, and `--expected-source` for an exact local fixed-80 source comparison
 virtual DASD, current 0600 location, MAINT/0600 directory location, real 0127
 volume links, and CMS QUERY DISK. No generic command tool is added. This local
 validator uses the explicit link-observation capability; normal MCP defaults
-and its fifteen-tool catalog are unchanged.
+and its 18-tool catalog are unchanged.
 
 The separate explicit `--access-existing-g` option may issue exactly
 `ACCESS 600 G`, never LINK, FORMAT, RELEASE, replacement or erasure. It refuses
