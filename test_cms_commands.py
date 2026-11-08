@@ -104,6 +104,20 @@ class CommandTests(unittest.TestCase):
         self.assertEqual(len(fake.host_files),1)
         self.assertFalse(fake.aid_wait)
 
+    def test_reconnect_running_banner_is_not_a_cms_ready_boundary(self):
+        from cms_capture import CaptureError
+        s,fake=self.session()
+        fake.rows=[" "*80 for _ in range(24)]
+        fake.rows[0]="LOGON *****"
+        fake.rows[1]="09:00:00 z/VM Version 6 Release 3.0, Service Level 1302"
+        fake.rows[5]="09:00:00 RECONNECTED AT 09:00:00 EST TUESDAY 10/20/26"
+        fake.rows[22]="*"*80
+        fake.rows[23]=" "*59+"RUNNING   ********"
+        with self.assertRaisesRegex(CaptureError,"fresh CMS Ready"):
+            s.runner._ready_boundary()
+        self.assertFalse(any(call == "Enter" or call.startswith("Transfer(")
+                             for call in fake.calls))
+
     def test_disconnect_invalidates_runner_verification(self):
         s,fake=self.session()
         s.runner.name="ZMABCDEF"
@@ -164,6 +178,8 @@ class CommandTests(unittest.TestCase):
         self.assertTrue(result["ok"],result)
         self.assertFalse(result["created"])
         self.assertFalse(any("Direction=send" in call for call in fake.calls))
+        self.assertEqual(fake.transfer_count,1)
+        self.assertFalse(any(call.startswith('String("STATE ') for call in fake.calls))
 
     def test_complete_output_beyond_one_screen_and_actual_nonzero_rc(self):
         records=[("RECORD %03d  "%n).encode("cp037") for n in range(30)]

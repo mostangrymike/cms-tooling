@@ -12,37 +12,108 @@
   input after connection and field layout have been established.
 - The operator subsequently authorized local credentials and login after the
   combined guest form was established. `--allow-login` permits only that one-shot
-  field-aware login. Keep generic `--allow-input` disabled. Do not send BEGIN,
-  CMS commands, file transfers, or password retries as part of login.
+  field-aware login. Do not send BEGIN, CMS commands, file transfers, or password
+  retries as part of login; subsequent actions follow the standing CMS
+  authorization recorded below.
 - Credentials belong in an owner-only file outside the repository, loaded locally
   at login. Never print values or put them in MCP arguments. Legacy constants may
   be imported once by AST extraction; never execute legacy scripts to obtain them.
 - The operator then authorized continuing the established VM READ startup prompt
   to CMS Ready. `--allow-startup` allows one blank Enter at the verified logon
-  input, or BEGIN to resume a verified CP READ reconnect. It does not authorize
-  arbitrary CMS commands, existing-input replacement, or file operations.
+  VM READ input or BEGIN to resume a verified CP READ reconnect. A z/VM guest
+  reconnect banner with RUNNING and an empty field is not a CMS `Ready;` prompt.
+  IBM documents RUNNING as ambiguous between work in progress and a
+  command-ready environment; a null input line distinguishes CP READ from VM
+  READ. Do not run CMS commands or transfers from that banner. Require a fresh
+  CMS Ready prompt for command/transfer boundaries and correlated Ready output
+  for completion.
+- Earlier M272 instructions authorized one fixed `Clear` only at a freshly
+  observed, formatted MORE/HOLDING page. The standing authorization below
+  supersedes that limit. IBM also documents PA2 as an immediate page advance
+  that preserves the input area; the M272 paging path now uses PA2, advancing
+  exactly one page and waiting for readable output.
+- A 3270 `MORE...` prompt may be followed by the current z/VM host name (for
+  example, `TACOTICO`). That suffix is an informational, changeable host
+  identifier, not part of the MORE prompt; detect and advance on MORE itself.
+- On 2026-10-19, the operator authorized Codex to take any action on CMS without
+  per-action confirmation and asked that this authority be recorded for future
+  reference. This standing authorization supersedes the narrower CMS
+  terminal-input, paging, command, recovery, and file-operation approval limits
+  in this document for future CMS work. Continue to record each action and
+  observed result; use only actions needed for the active task. MCP capability
+  flags still describe what the configured server can perform; authorization
+  does not enable a disabled capability by itself.
+- M272 recovery candidate `ZM9A512F EXEC A` was sent with DFT `Exist=keep`, but
+  transfer ended with TRANS14; its later read-only receive also ended with
+  TRANS14. Treat it as possibly partial: do not execute, overwrite, or erase it
+  without first resolving the transfer state and source contents.
 - The fixed read-only QUERY CMSLEVEL probe was also authorized and returned
   CMS Level 27, Service Level 1302 and a fresh Ready prompt. `cms_startup` may
   run this exact guarded probe only with `verify_cms=true`; it is not a general
-  command interface. Keep general terminal input and file operations disabled.
+  command interface.
+- On 2026-10-20, the original terminal 0200 showed MORE after a null Enter;
+  PA2 produced an unformatted 24x80 all-asterisk buffer. On a later 0200
+  reconnect, another null Enter also led to an unformatted buffer. A fixed
+  QUERY CMSLEVEL was typed but never submitted. These attempts completed no
+  CMS command or transfer. The source-verified runner boundary now requires a
+  fresh CMS Ready prompt and refuses the ambiguous reconnect RUNNING banner.
+  For MORE during reconnect logon messages, IBM Getting Started documentation
+  says to press Clear. On the fresh terminal, Clear advanced the observed MORE
+  page to CP READ with the `Already logged on GRAF 0200` response.
+- On 2026-10-20, a fresh automatically assigned terminal first reached CP READ
+  and reported MAINT already logged on at GRAF 0200. IBM LOGON syntax is
+  `LOGON userid HERE` (without parentheses) to reconnect an already logged-on
+  user at the current terminal. The first parenthesized attempt was rejected;
+  the corrected command reached a hidden CP password field. `cms_mcp.py` now
+  exposes `cms_login(reconnect_here=True)` and can resume only one empty
+  nondisplay CP field after moving to and rechecking its cursor. The local
+  credential provider submitted the password once. A null Enter on the fresh
+  formatted RUNNING banner exposed `Ready;`; `cms_startup` observed that Ready,
+  and `cms_prepare_runner(create=false)` freshly verified `ZM581503 EXEC A`.
+- In that 2026-10-20 session, `cms_download(GIT EXEC A, create_runner=true)`
+  failed during read-only capture. The screen remained locked at VM READ on
+  token `7D3472E4A80B67C7`, sequence 165 (`ZM1 ... D`); passive checks showed
+  no progress. `cms_restart_runner` correctly rejected recovery because there
+  was no final failed-frame ACK followed by Ready(12), and sent no input. The
+  subsequent reconnect exposed final `F 165 ACK` and Ready(12), allowing
+  `cms_restart_runner` to mark it incomplete. `cms_prepare_runner` then
+  reverified `ZM581503`. A second read-only capture of `GITUPD EXEC A` also
+  failed with Ready(12), token `934A58E998021CC8`, sequence 93; that failed
+  capture was reset and the command runner reverified. `STATE GITUPD EXEC A`
+  returned RC 0 and `LISTFILE GITUPD EXEC A` confirmed the file exists.
+- A command-runner `TYPE GITUPD EXEC A` source read then exceeded its 120-second
+  tool timeout and was interrupted. On reconnect, it returned to Ready(12) with
+  token `04C3A6DC7840B255`, sequence 62, but the visible ACK row had a trailing
+  malformed suffix, so `cms_restart_runner` refused the boundary. The terminal
+  was disconnected without more input. No M273 EXEC was uploaded or replaced.
+  The two `cms_download(create_runner=true)` attempts may have left newly
+  created random reader EXECs on A; their names were omitted by the temporary
+  local MCP client formatter. Preserve any new ZMxxxxxx EXECs until inventory
+  identifies them. M273 CMS validation remains pending; do not submit input
+  from an unresolved or malformed runner frame.
 - The operator authorized arbitrary one-line CMS command capture and CMS file
   uploads/downloads without per-call approval. `--allow-arbitrary-commands`
   removes the read-only command allowlist while retaining the correlated runner;
-  `--allow-input` remains disabled. Commands must be printable ASCII, at most 108
-  characters, and cannot include `|` or `#` because those delimit capture stages
-  and CMS logical lines. Full-screen, interactive, or session-ending commands may
-  not return captured output. A command tool call itself is the requested command.
+  commands must be printable ASCII, at most 108 characters, and cannot include
+  `|` or `#` because those delimit capture stages and CMS logical lines.
+  Full-screen, interactive, or session-ending commands may not return captured
+  output. A command tool call itself is the requested command.
 - `cms_download` remains a literal-file-ID native read path with two identical
   reads and matching metadata. `cms_upload_file` accepts local paths only beneath
   the configured Git worktree, exact CMS file IDs, and ASCII/binary DFT options.
   Existing targets require `overwrite_existing=true`; state checks are not atomic.
   It checks target presence after DFT but does not claim content readback. The
   reviewed fixed-80 `cms_upload_create_only` path still verifies native readback.
-- Runner provisioning requires explicit `create=true` and creates only an absent
-  randomly named ZMxxxxxx EXEC A with Exist=keep. Round-trip verify source before
-  execution; never overwrite or erase a helper. Reuse a configured runner only
-  after verifying its source again. The current command runner source changed, so
-  do not reuse ZM537EF1; create and source-verify a new helper before commands.
+- Runner provisioning requires explicit `create=true` and uses a random
+  ZMxxxxxx EXEC A with DFT `Exist=keep`, which fails rather than replacing an
+  existing destination. A CMS STATE absence result is useful when correlated
+  Ready/RC output is available, but is not required for the no-replace transfer.
+  Round-trip verify source before execution; never overwrite or erase a helper.
+  The M272 command runner `ZM581503 EXEC A` passed exact round-trip verification
+  on 2026-10-19. Reuse it only after verifying its source again in each session;
+  it was freshly source-verified on 2026-10-20 before the download capture stalled.
+  The terminal/server then disconnected, so any future session must verify its
+  source again before running commands.
 - Command output uses numbered, nonce-correlated native records with lengths,
   byte counts, checksum and acknowledgements. Paging advances only on observed
   MORE/HOLDING after capture; no timed scrolling. Mask encoded payload in all
@@ -83,6 +154,31 @@
 - Keep stdout exclusively MCP JSON-RPC. Diagnostics go to stderr. Never log
   terminal input, passwords, nondisplay field contents, or raw ReadBuffer hex.
 - Retain complete sanitized screen geometry and diagnostic evidence on failures.
+- M272 flat-tree checkout passed on CMS on 2026-10-19. The current configured
+  command runner is `ZM581503 EXEC A`, created with DFT `Exist=keep` and
+  verified by exact round trip. The operator's current CMS registration has
+  `--allow-input` and `--runner-name ZM581503`. A server started before that
+  config update was terminated after use; future server starts should read the
+  current registration.
+- The M272 tree fixture remains as `Z272TR REPO A`, and the checkout created
+  `Z272A TXT A` and `Z272B TXT A` plus the worktree map entry. Both independent
+  HASH-WORKFILE results matched blob
+  `1A9E9EB8561B10E9D146BFE9933974882B74940E`. The unattached commit is
+  `3F324CA0CE1685FA1579F9E897DB353DE5DF5DC6`; no ref update was run.
+- `ZM02EA0B EXEC A` failed source round-trip verification and is no longer
+  configured as the download runner. Do not execute, overwrite, or erase it
+  without first resolving its exact contents. Older uncertain candidates
+  `ZMD898D4`, `ZM9A512F`, and `ZM6D541B` also remain unverified; preserve them.
+- CMS runner output can briefly show a locked VM READ field while an ACK is
+  pending. Wait only within the same verified token/frame boundary. After the
+  final ACK, Ready may replace the visible `Z DONE` row; correlate the exact
+  `ZA1 <token> <sequence>` echo with Ready and the in-memory completed token.
+- On the final M272 recovery, failed read-only capture
+  `F788EDC4624E2EFA` was observed as sequence 4 ACK followed by `Ready(00012)`.
+  `cms_restart_runner` marked it incomplete; `cms_prepare_runner(create=false)`
+  reverified `ZM581503`; a read-only `STATE Z272B TXT A` returned RC 0; then
+  `cms_resolve_failed_capture` resumed commands. The failed ref-display output
+  remains incomplete; do not infer a ref value from that capture.
 - Run offline unit tests and protocol validation before any live test. The live
   smoke test must only connect and read screen/status; leave a connected,
   responsive terminal open rather than disconnecting to end the smoke test.
@@ -114,7 +210,6 @@
 - Transfer completion precedes restoration of the CMS command field. Use both
   AidWait for transfer completion and fresh Ready/empty-field/cursor verification
   before another transfer. Do not infer readiness from transfer completion alone.
-- Any IPL, LOGOFF, or broader recovery requires separate authorization.
 - The approved retained-fixture audit created source-verified ZME09C7C EXEC A
   for exact ZTQUAL MODULE A1 native reads only. It transports bounded chunks
   with original record lengths for the observed three-record V52312 output.
@@ -206,3 +301,90 @@
   authorization to run a particular command or alter a particular production
   file; preserve protected targets and require the exact target/operation in the
   current task. Do not claim CMS target qualification or atomic write safety.
+
+- 2026-10-20 CMS M273 continuation: the operator explicitly authorized any CMS
+  actions and asked this to persist for future reference. EC2 entry is
+  `admin@3.17.164.13`; Telnet CMS endpoint is `192.168.200.2`. Treat the z/VM
+  banner host suffix as mutable and ignore it. Reconnect with Telnet `send brk`,
+  `LOGON MAINT HERE`, password, then Telnet `send ip`, CP `BEGIN`, and one null
+  Enter if CMS Ready does not appear. For a fresh logon, issue `IPL CMS` and
+  `ACCESS 600 G`. CMS level observed: 27 / service level 1302. IBM
+  `QUERY TERMINAL` returned TYPE TTY, PROMPT TTY, SCROLL CONT, SYS3270 OFF;
+  3270 MORE screen advancement therefore does not apply to this Telnet line.
+- M273 CMS setup on 2026-10-20 used a temporary read-only FTP source server on
+  `192.168.200.1:2121` and a verified-TLS GitHub bridge on
+  `192.168.200.1:9443`, both reached from CMS and restricted to the needed files
+  and fixed GitHub destination. Shut these temporary processes down when the
+  session is complete. Do not record or expose CMS credentials.
+- `GITREMOT.EXEC` fixes from this session: preserve remote URL case by parsing
+  the action without `PARSE UPPER`, and treat a parsed URL path as success
+  unless the result is `ERROR`. CMS `GITREMOT REPO A` contains the configured
+  `origin` remote for `https://github.com/mostangrymike/cms-git.git`.
+- M273 fetch framing defect found on CMS: `GITFPACK` emits a long verified-pack
+  summary which CMS `PIPE ... STEM` wraps at column 80, including in the middle
+  of the 40-character OID. `GIT PULL` now concatenates wrapped STEM fragments
+  before validating the 11-word summary. This correction is in local
+  `cms-git/src/GIT.EXEC` and was uploaded to CMS `GIT EXEC A`; pre-debug and
+  debug backups are `M273B007 EXEC G` and `M273B008 EXEC G` respectively.
+- Direct CMS `GITFPACK` succeeded for GitHub `main`, OID
+  `7A9B72EA68D865BC611A04E15BD55E0A76564275`, pack size 3,529,494 bytes,
+  11,816 objects. The corrected pull framing retained `M273P010 STAGE G`.
+  `EXEC GIT FETCH-ACTIVATE M273P010 M273I010 G` was then interrupted with
+  Telnet IP and CP LOGOFF after `QUERY TIME` reported 17:44.99 virtual CPU over
+  a 19:37 connection. Fresh CMS inspection confirmed the stage exists and
+  `M273I010 INDEX G` is absent. No ref update was run; no successful full M273
+  pull is confirmed. Preserve the pack and stage for retry.
+- Performance diagnosis: `GITFACT EXEC` invokes `GITPLOAD` separately for each
+  indexed object. `GITPLOAD.C` opens/seeks `dd:STGIN`, writes `dd:OBJOUT`, and
+  hashes each object; `GITFACT` then invokes `GIT VERIFY-OBJECT` per installed
+  object. The existing assembler FSREAD helpers are not integrated into this
+  M273 path: M199 `GITBX9.ASSEMBLE` reads only the hard-coded
+  `M173NET STAGE G1` range into `GITR199 DATA A1`. Do not describe that prior
+  optimization as covering M273 until a generalized reader and batch path are
+  connected and target-validated. Earlier retained fetch packs include
+  `M273PACK`, `M273P003`, `M273P004`, `M273P005`, and `M273P006`. The local
+  `src/GIT.EXEC` fetch-summary framing fix remains deployed as `GIT EXEC A`.
+- 2026-10-20 M273 performance candidate work uses the documented CMS C build
+  command `CMSCLNK name PLAIN` from `CMS-C-RECIPE.md`; do not use `CC`. Candidate
+  sources `M274LD C A` and `M274FCT EXEC A` were transferred to CMS. The first
+  `CMSCLNK M274LD PLAIN` stopped at C compilation with RC 12 because GCCCMS's
+  installed `errno.h` does not define `ENOENT`; `M274LD ASSEMBLE A` was
+  confirmed absent afterward. A diagnostic `M274ERR C A` was transferred to
+  measure CMS `fopen`/`errno` behavior, but was not built or run. The Telnet
+  endpoint `192.168.200.2:23` then stopped accepting connections from EC2, and
+  read-only EC2 inspection found no running Hercules/3270/CMS process. No batch
+  loader module, index, loose objects, or ref update is confirmed. Resume only
+  after restoring the endpoint and resolving the `ENOENT` portability issue;
+  preserve the transferred candidates and inspect all compiler outputs before
+  any rebuild.
+- 2026-10-21 Hercules on EC2 was restarted in tmux session `hercules` after
+  restoring host `tap0`; z/VM FORCE start completed, TCPIP autologged, QETH
+  opened `tap0`, and guest Telnet `192.168.200.2:23` accepted a connection.
+  The MAINT Telnet attempt reached the z/VM 6.3 banner but did not confirm CMS
+  `Ready;`. See `HERCULES-EC2-STARTUP.md` for commands, recovery prompts, CCKD
+  repair observations, and the exact validation limit.
+- 2026-10-21 enabled systemd units `hercules-tap0.service` and
+  `hercules.service` for boot persistence. The TAP unit idempotently creates
+  host `tap0`; the emulator unit uses a separate `hercules-autoboot.rc` to IPL
+  `0123`, attempt `.warm`, then answer `.no`. Automatic FORCE is intentionally
+  omitted. `systemd-analyze verify` passed and the TAP unit started on the live
+  interface; Hercules was not started twice and no reboot was performed. The
+  next EC2 reboot remains the end-to-end check. See `HERCULES-EC2-STARTUP.md`.
+
+- 2026-10-21 CMS M273 performance run: after `GITFIMP M273P010 G` returned
+  `FETCH IMPORT VERIFIED M273P010 -> M273P010 STAGE G OBJECTS 11816 PACK
+  7A9B72EA68D865BC611A04E15BD55E0A76564275`, read-only checks confirmed the
+  stage exists, `M273P010 META A` reports 3,529,494 bytes / 11,816 objects,
+  and `QUERY DISK G` showed 67,263 blocks free. No FILEDEFs were set. The
+  operator requested that the next long run be interrupted as impractical.
+  `M274F5 M273P010 M273I011 G` had run about 1 hour 48 minutes with CP01
+  saturated near 100–200 MIPS and no I/O; it had produced no captured CMS
+  completion text. Following IBM's CMS interrupt procedure, Telnet IP was sent,
+  then `HX` (with a CP `REQUEST` step attempted after the first HX did not
+  return output). Hercules `qproc` then reported both CPUs at 0 MIPS in
+  repeated samples. The local Telnet driver and SSH child were terminated to
+  clear the hung terminal; Hercules logged `TCPIP2 DISCONNECT MAINT ... FORCED
+  BY SYSTEM`. The CMS `Ready` message and command RC were not captured. Preserve
+  `M273P010 STAGE G` and any partial `M273I011 INDEX G`/loose objects; inspect
+  their state before retrying or cleaning anything. No ref update was run.
+  IBM interruption reference: https://www.ibm.com/docs/en/zvm/7.4?topic=execution-interrupting-your-programs

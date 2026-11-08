@@ -230,7 +230,7 @@ class StartupTests(unittest.TestCase):
         self.assertEqual(fake.calls.count("Enter"), 1)
         self.assertEqual(progress["waits"], 1)
 
-    def test_recorded_reconnect_running_blank_is_cms_command_ready(self):
+    def test_recorded_reconnect_running_blank_is_not_cms_command_ready(self):
         s, fake = self.session("cp_read")
         captured = recorded_screen("reconnect_running")
         flat = list("".join(captured["rows"]))
@@ -251,10 +251,10 @@ class StartupTests(unittest.TestCase):
             return original(action)
         fake.exec_command = transition
         result = s.startup()
-        self.assertTrue(result["ok"], result)
-        self.assertEqual(result["outcome"], "cms_ready_observed")
+        self.assertFalse(result["ok"], result)
+        self.assertEqual(result["outcome"], "startup_transition_observed")
         self.assertEqual(result["actions"], ["BEGIN", "Enter"])
-        self.assertEqual(result["screen"]["state"], "cms_ready")
+        self.assertEqual(result["screen"]["state"], "vm_running")
         self.assertEqual(result["actions"], ["BEGIN", "Enter"])
         self.assertEqual(fake.calls.count("Enter"), 1)
 

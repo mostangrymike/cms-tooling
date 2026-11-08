@@ -12,7 +12,9 @@
 
 # Standalone local Python environment
 /.venv/
+/.local/
 /.DS_Store
 
 # Retain historical machine-local validation captures.
 /[z]vm-*.json
+tnz.log

@@ -191,7 +191,8 @@ class FileUploadTests(unittest.TestCase):
         self.session = Session(allow_commands=True, allow_uploads=True, upload_root=self.repo,
                                factory=Mock(side_effect=AssertionError("No terminal needed")))
         self.session.runner.verified = True
-        self.session.runner._simple = Mock(side_effect=[{"rc": 28}, {"rc": 0}])
+        self.session.runner.run = Mock(side_effect=[{"ok": True, "cms_rc": 28},
+                                                    {"ok": True, "cms_rc": 0}])
         self.sent = []
 
         def transfer(action):
@@ -213,10 +214,11 @@ class FileUploadTests(unittest.TestCase):
         self.assertEqual(self.sent[0][1], b"A   \nB   \n")
         self.assertIn("Exist=keep", self.sent[0][0])
         self.assertIn("Recfm=fixed,Lrecl=4", self.sent[0][0])
-        self.assertEqual(self.session.runner._simple.call_count, 2)
+        self.assertEqual(self.session.runner.run.call_count, 2)
 
     def test_existing_target_requires_explicit_overwrite_and_uses_replace(self):
-        self.session.runner._simple = Mock(side_effect=[{"rc": 0}, {"rc": 0}])
+        self.session.runner.run = Mock(side_effect=[{"ok": True, "cms_rc": 0},
+                                                    {"ok": True, "cms_rc": 0}])
         result = self.session.file_uploader.upload("sample.txt", "SAMPLE", "TEXT", "A1",
             overwrite_existing=True)
         self.assertTrue(result["ok"], result)
@@ -224,7 +226,7 @@ class FileUploadTests(unittest.TestCase):
         self.assertTrue(result["overwrite_existing"])
 
     def test_existing_target_is_not_replaced_by_default(self):
-        self.session.runner._simple = Mock(return_value={"rc": 0})
+        self.session.runner.run = Mock(return_value={"ok": True, "cms_rc": 0})
         result = self.session.file_uploader.upload("sample.txt", "SAMPLE", "TEXT", "A1")
         self.assertFalse(result["ok"])
         self.assertFalse(result["transfer_attempted"])
@@ -236,7 +238,7 @@ class FileUploadTests(unittest.TestCase):
         self.session.secrets.add("A")
         credential = self.session.file_uploader.upload("sample.txt", "SAMPLE", "TEXT", "A1")
         self.assertFalse(credential["ok"])
-        self.session.runner._simple.assert_not_called()
+        self.session.runner.run.assert_not_called()
         self.session.runner._transfer.assert_not_called()
         self.assertIsNone(self.session.em)
 

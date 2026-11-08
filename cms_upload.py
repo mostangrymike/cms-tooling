@@ -209,6 +209,10 @@ class FileUploader:
 
         target = " ".join(identity)
         attempted = False
+        # Correlated CMS captures can cross several VM READ/Ready transitions;
+        # the old 20-second state-probe cap was shorter than those target
+        # screens took to acknowledge every frame.
+        state_timeout = min(60, max(20, timeout // 4))
 
         def work():
             nonlocal attempted
@@ -216,9 +220,11 @@ class FileUploader:
             if (root_now != root or worktree_now != worktree or source.is_symlink()
                     or not source.is_file() or source.read_bytes() != data):
                 raise CaptureError("Upload source or configured root changed before transfer")
-            state = s.runner._simple("STATE " + target, time.monotonic() + 20)
+            state = s.runner.run("STATE " + target, timeout=state_timeout)
+            if not state.get("ok"):
+                raise CaptureError("CMS target state check did not complete with correlated output and RC")
             expected_rc = 0 if overwrite_existing else 28
-            if state["rc"] != expected_rc:
+            if state.get("cms_rc") != expected_rc:
                 expectation = "an existing target" if overwrite_existing else "an absent target"
                 raise CaptureError("CMS target does not match the requested overwrite policy; expected " + expectation)
             with tempfile.TemporaryDirectory(prefix="cms_mcp_upload_") as folder:
@@ -230,8 +236,8 @@ class FileUploader:
                           f'Host=vm,Mode={mode},Exist={exist},Recfm={recfm}{lrecl_opt},BufferSize=2048)')
                 attempted = True
                 s.runner._transfer(action)
-            after = s.runner._simple("STATE " + target, time.monotonic() + 20)
-            if after["rc"] != 0:
+            after = s.runner.run("STATE " + target, timeout=state_timeout)
+            if not after.get("ok") or after.get("cms_rc") != 0:
                 raise CaptureError("Transfer completed but the CMS target is not present on the verified filemode")
             return {"target": target, "source_path": str(source),
                     "source_sha256": hashlib.sha256(data).hexdigest(),

@@ -32,21 +32,64 @@ class RunnerBridge:
         self.recovery_observation_count = 0
 
     @staticmethod
-    def input_field(screen):
+    def input_field_shape(screen):
         fields = [f for f in screen["fields"] if not f["protected"]]
-        return (screen["connected"] and screen["keyboard"] == "U"
-                and screen["field_layout_error"] is None and len(fields) == 1
+        return (screen["connected"] and screen["field_layout_error"] is None
+                and len(fields) == 1
                 and (fields[0]["row"], fields[0]["column"], fields[0]["length"]) == (23, 1, 139)
                 and fields[0].get("empty") and not fields[0]["nondisplay"])
 
-    def _input(self, text):
-        s = self.session
-        before = s.snapshot()
-        if not self.input_field(before):
+    @classmethod
+    def input_field(cls, screen):
+        return cls.input_field_shape(screen) and screen["keyboard"] == "U"
+
+    def _await_input_field(self, screen, allow_vm_read=False, expected_ack=None, timeout=5):
+        """Wait briefly for a locked REXX PULL field to unlock without losing its ACK boundary."""
+        from cms_mcp import host_display
+
+        allowed_states = {"cms_ready", "vm_running"}
+        if allow_vm_read:
+            allowed_states.add("vm_read")
+            if (not isinstance(expected_ack, tuple) or len(expected_ack) != 2
+                    or not isinstance(expected_ack[1], int) or expected_ack[1] < 0
+                    or self.session.capture_token != expected_ack[0]):
+                raise CaptureError("Runner ACK is not bound to a verified active frame")
+        if (screen.get("state") not in allowed_states
+                or not self.input_field_shape(screen)):
             raise CaptureError("Command/ack input field is not verified empty and writable")
+        initial_state = screen["state"]
+        initial_display = host_display(screen)
+        deadline = time.monotonic() + timeout
+        current = screen
+        while not self.input_field(current):
+            display_changed = host_display(current) != initial_display
+            if (current.get("state") != initial_state
+                    or not self.input_field_shape(current)
+                    or display_changed and not allow_vm_read):
+                raise CaptureError("Command/ack screen changed while waiting for keyboard unlock")
+            if time.monotonic() >= deadline:
+                raise CaptureError("Command/ack input field remained locked")
+            self.session._wait_output(1)
+            current = self.session.snapshot()
+        return current
+
+    def _input(self, text, allow_vm_read=False):
+        s = self.session
+        expected_ack = None
+        if allow_vm_read:
+            match = re.fullmatch(r"ZA1 ([0-9A-F]{16}) ([0-9]+)", text)
+            if not match:
+                raise CaptureError("Only a numbered runner ACK may use the VM READ input field")
+            expected_ack = (match[1], int(match[2]))
+        before = self._await_input_field(s.snapshot(), allow_vm_read=allow_vm_read,
+                                         expected_ack=expected_ack)
         s.command("MoveCursor(22,0)")
-        check = s.snapshot()
-        if not self.input_field(check) or check["cursor"] != {"row": 23, "column": 1, "protected": False}:
+        check = self._await_input_field(s.snapshot(), allow_vm_read=allow_vm_read,
+                                        expected_ack=expected_ack)
+        from cms_mcp import host_display
+        if (check["cursor"] != {"row": 23, "column": 1, "protected": False}
+                or check["state"] != before["state"]
+                or host_display(check) != host_display(before)):
             raise CaptureError("Input cursor or field changed; no text submitted")
         if (not isinstance(text, str) or not text or len(text) > 139
                 or any(ord(char) < 32 or ord(char) > 126 for char in text)):
@@ -67,8 +110,11 @@ class RunnerBridge:
     def _ready_boundary(self):
         s = self.session
         screen = s.snapshot()
-        if screen["state"] != "cms_ready" or not self.input_field(screen):
-            raise CaptureError("Establish CMS Ready and an empty input field before command execution")
+        ready_prompt = (screen.get("state") == "cms_ready"
+                        and any(ready_rc(row) is not None for row in screen.get("rows", [])))
+        if not self.input_field(screen) or not ready_prompt:
+            raise CaptureError(
+                "Establish a fresh CMS Ready prompt before command or transfer execution")
         # Never mistake an interrupted runner's old Ready prompt for a shell.
         completed = {*s.completed_capture_tokens, self.completed_token, s.completed_capture_token,
                      *self.resolved_failed_capture_tokens}
@@ -135,11 +181,21 @@ class RunnerBridge:
                         return False
                     if match[1] == capture_token and match[2] == "Z" and match[4] == "DONE":
                         markers.append(index)
-                elif re.search(r"\bZA1 [0-9A-F]{16} \d+\b", row):
-                    return False
+                else:
+                    ack = re.fullmatch(r"\s*ZA1 ([0-9A-F]{16}) ([0-9]+)\s*", row)
+                    if ack and (ack[1] != capture_token
+                                or self.completed_token != capture_token):
+                        return False
             ready = [(index, ready_rc(row)) for index, row in enumerate(rows)
                      if ready_rc(row) is not None]
-            return len(markers) == 1 and any(index > markers[0] for index, _ in ready)
+            visible_completion = (len(markers) == 1
+                                 and any(index > markers[0] for index, _ in ready))
+            # PA2 can clear the terminal row containing Z DONE after the bridge
+            # has already accepted it. Preserve that in-memory token/Ready
+            # correlation so a stable Ready screen can still resolve recovery.
+            remembered_completion = (self.completed_token == capture_token
+                                     and s.capture_token is None and bool(ready))
+            return visible_completion or remembered_completion
 
         def work():
             first = s.snapshot()
@@ -170,6 +226,71 @@ class RunnerBridge:
                     "screen": second}
 
         return s._run("resolve_failed_capture", work, timeout=10)
+
+    def restart_runner(self, token):
+        """Clear a stable failed-ack fence and require source verification again.
+
+        This is an in-session protocol recovery, not a VM or MCP process restart.
+        It sends no terminal input and never treats the failed output as complete.
+        """
+        s = self.session
+        if not s.allow_commands:
+            return {"ok": False, "message": "Command recovery requires --allow-commands"}
+        if not isinstance(token, str) or not re.fullmatch(r"[0-9A-F]{16}", token):
+            return {"ok": False, "message": "Supply the exact uppercase 16-hex failed request token"}
+
+        def failed_ack_boundary(screen):
+            if (screen.get("state") != "cms_ready" or not self.input_field(screen)
+                    or (screen.get("capture_active") and s.capture_token != token)):
+                return None
+            protocol = []
+            ready = []
+            for index, row in enumerate(screen.get("rows", [])):
+                match = re.fullmatch(
+                    r"\s*ZM1 ([0-9A-F]{16}) F ([0-9]{1,6}) ACK\s*", row)
+                if match:
+                    protocol.append((index, match[1], int(match[2])))
+                elif "ZM1 " in row or re.search(r"\bZA1 [0-9A-F]{16} [0-9]+\b", row):
+                    return None
+                rc = ready_rc(row)
+                if rc is not None:
+                    ready.append((index, rc))
+            if (len(protocol) != 1 or protocol[0][1] != token or len(ready) != 1
+                    or ready[0][1] != 12 or protocol[0][0] >= ready[0][0]):
+                return None
+            return protocol[0][2]
+
+        def work():
+            first = s.snapshot()
+            sequence = failed_ack_boundary(first)
+            if sequence is None:
+                return {"ok": False, "outcome": "runner_restart_boundary_not_verified",
+                        "screen": first, "output_complete": False,
+                        "cms_command_complete": False}
+            second = s.snapshot()
+            if (failed_ack_boundary(second) != sequence or first["rows"] != second["rows"]
+                    or first.get("terminal_status") != second.get("terminal_status")):
+                return {"ok": False, "outcome": "runner_restart_screen_not_stable",
+                        "screen": second, "output_complete": False,
+                        "cms_command_complete": False}
+
+            self.resolved_failed_capture_tokens.add(token)
+            self.failed_capture_observation_only = True
+            self.recovery_observation_count = 0
+            self.verified = False
+            self.completed_token = None
+            s.capture_token = None
+            s._protocol_rows = []
+            s.completed_capture_token = None
+            return {"outcome": "runner_recovery_reset",
+                    "request_id": token, "failed_sequence": sequence, "cms_rc": 12,
+                    "output_complete": False, "integrity_verified": False,
+                    "cms_command_complete": False, "cms_input_sent": False,
+                    "runner_verified": False, "source_verification_required": True,
+                    "arbitrary_commands_enabled": False,
+                    "next_step": "Call cms_prepare_runner to verify the helper source."}
+
+        return s._run("restart_runner", work, timeout=10)
 
     def _simple(self, command, deadline):
         """Internal fixed read-only observations; require echoed command and Ready RC.
@@ -217,12 +338,12 @@ class RunnerBridge:
                 held_pages.add(page)
                 if positions:
                     cleared_echo_page = console
-                self.session.command("Clear")
+                self.session.command("PA(2)")
             else:
                 self.session._wait_output(1)
         raise CaptureError("Bootstrap STATE did not return correlated Ready/RC evidence")
 
-    def _transfer(self, action):
+    def _transfer(self, action, allow_unready=False):
         # AidWait=false is needed for terminal synchronization, but also makes
         # Transfer() asynchronous. Temporarily block on the emulator's transfer
         # completion; a transport failure poisons the process and is not retried.
@@ -239,23 +360,49 @@ class RunnerBridge:
         result = s.command(action)
         s.command("Set(AidWait,false)")
         # DFT completion precedes CMS restoring its line-mode command field.
-        # Starting another Transfer immediately can lose the command prefix.
+        # Startup or transfer output may fill the 3270 display and leave a
+        # MORE.../HOLDING notice. IBM defines Clear or PA2 as the request for
+        # the next page; Enter would only hold the current page. PA2 preserves
+        # the input area while clearing output. Advance only a newly observed,
+        # formatted MORE/HOLDING page, and wait through any transient buffer.
         from cms_mcp import host_display
-        deadline = time.monotonic() + 10
+        deadline = time.monotonic() + 90
         fresh = False
+        advanced_pages = set()
         while time.monotonic() < deadline:
             after = s.snapshot()
             fresh = fresh or host_display(after) != host_display(before)
+            if (after.get("formatted") and after.get("field_layout_error") is None
+                    and after.get("state") in {"more", "holding"}):
+                page = host_display(after)
+                if page not in advanced_pages:
+                    if len(advanced_pages) >= 64:
+                        raise CaptureError("Transfer synchronization exceeded the 64-page limit")
+                    advanced_pages.add(page)
+                    s.command("PA(2)")
+                    s._wait_output(1)
+                    continue
             prompts = [ready_rc(row) for row in after["rows"] if ready_rc(row) is not None]
             if fresh and after["state"] == "cms_ready" and self.input_field(after) and prompts and prompts[-1] == 0:
-                return result
+                candidate_display = host_display(after)
+                s._wait_output(1)
+                stable = s.snapshot()
+                stable_prompts = [ready_rc(row) for row in stable["rows"] if ready_rc(row) is not None]
+                if (stable.get("formatted") and stable.get("field_layout_error") is None
+                        and stable["state"] == "cms_ready" and self.input_field(stable)
+                        and stable_prompts and stable_prompts[-1] == 0
+                        and host_display(stable) == candidate_display):
+                    return {"ready_verified": True, "screen": stable}
             fresh = s._wait_output(1) or fresh
-        raise CaptureError("Transfer finished, but fresh CMS Ready and command field are unverified")
+        if allow_unready:
+            return {"ready_verified": False, "screen": s.snapshot()}
+        suffix = " after paging output" if advanced_pages else ""
+        raise CaptureError(f"Transfer finished, but fresh CMS Ready and command field are unverified{suffix}")
 
-    def prepare(self, create=False, timeout=60):
+    def prepare(self, create=False, timeout=240):
         s = self.session
-        if type(timeout) is not int or not 1 <= timeout <= 60:
-            return {"ok": False, "message": "Runner preparation timeout must be 1..60 seconds"}
+        if type(timeout) is not int or not 1 <= timeout <= 240:
+            return {"ok": False, "message": "Runner preparation timeout must be 1..240 seconds"}
         if not s.allow_commands:
             return {"ok": False, "message": "Read-only commands require --allow-commands"}
         if self.name is None and not create:
@@ -267,17 +414,33 @@ class RunnerBridge:
             self._ready_boundary()
             created = self.name is None
             name = self.name or "ZM" + secrets.token_hex(3).upper()
-            state = self._simple(f"STATE {name} EXEC A", time.monotonic() + 15)
-            if state["rc"] != (28 if created else 0):
-                raise CaptureError("Runner filename is not absent/existing as required; no replacement allowed")
             self.name = name  # Retain the candidate identity even if transfer/verification fails.
             with tempfile.TemporaryDirectory(prefix="cms_mcp_") as directory:
                 local = Path(directory) / "runner.exec"
                 downloaded = Path(directory) / "received.exec"
                 local.write_text(source, encoding="ascii")
                 if created:
-                    self._transfer(f'Transfer(Direction=send,"HostFile={name} EXEC A",LocalFile={local},Host=vm,Mode=ascii,Exist=keep,Recfm=fixed,Lrecl=80,BufferSize=2048)')
-                self._transfer(f'Transfer(Direction=receive,"HostFile={name} EXEC A",LocalFile={downloaded},Host=vm,Mode=ascii,Cr=add,Exist=keep,BufferSize=2048)')
+                    # Use the host-side DFT no-replace guard for this random
+                    # candidate. A CMS STATE check is useful evidence but may
+                    # itself be trapped behind MORE output; Exist=keep makes
+                    # DFT fail rather than replace if the name already exists.
+                    sent = self._transfer(
+                        f'Transfer(Direction=send,"HostFile={name} EXEC A",LocalFile={local},Host=vm,Mode=ascii,Exist=keep,Recfm=fixed,Lrecl=80,BufferSize=2048)',
+                        allow_unready=True)
+                    if not sent["ready_verified"]:
+                        return {"ok": False, "runner": name, "fileid": f"{name} EXEC A",
+                                "created": False, "host_file_may_exist": True,
+                                "source_verified": False, "ready_verified": False,
+                                "message": "Create-only transfer returned, but CMS Ready is unverified; helper was not executed",
+                                "screen": sent["screen"]}
+                # For an already configured helper, a read-only native receive
+                # is itself the existence check and source verification. Avoid
+                # a CMS STATE command before this transfer: a reconnect banner
+                # can leave line-mode paging that prevents correlated STATE/RC
+                # capture even though the exact Ready input field is writable.
+                transfer_state = self._transfer(
+                    f'Transfer(Direction=receive,"HostFile={name} EXEC A",LocalFile={downloaded},Host=vm,Mode=ascii,Cr=add,Exist=keep,BufferSize=2048)',
+                    allow_unready=True)
                 if not downloaded.is_file():
                     raise CaptureError("Runner round-trip download is missing")
                 expected = [line.rstrip() for line in source.splitlines()]
@@ -285,13 +448,18 @@ class RunnerBridge:
                 if actual != expected:
                     raise CaptureError("Runner round-trip source verification failed; helper retained, not executed")
             self.verified = True
+            if not transfer_state["ready_verified"]:
+                return {"ok": False, "runner": name, "fileid": f"{name} EXEC A",
+                        "source_verified": True, "ready_verified": False,
+                        "message": "Runner source matches, but CMS Ready and command field are unverified",
+                        "screen": transfer_state["screen"]}
             return {"runner": name, "fileid": f"{name} EXEC A", "created": created,
-                    "source_verified": True, "existing_files_replaced": False,
+                    "source_verified": True, "ready_verified": True, "existing_files_replaced": False,
                     "host_output_files_created": False, "retained_on_host": True}
         result = s._run("prepare_runner", work, timeout=timeout)
         if not result["ok"] and self.bootstrap_evidence is not None:
             result["bootstrap"] = self.bootstrap_evidence
-        if not result["ok"] and self.name is not None:
+        if not result["ok"] and self.name is not None and not result.get("source_verified"):
             result.update({"runner": self.name, "retained_on_host_if_created": True, "source_verified": False})
         return result
 
@@ -330,13 +498,13 @@ class RunnerBridge:
                     capture.accept(available[expected])
                     page_cleared = False
                     while snap["state"] in {"more", "holding"}:
-                        s.command("Clear")
+                        s.command("PA(2)")
                         page_cleared = True
                         s._wait_output(1)
                         snap = s.snapshot()
                         if time.monotonic() >= deadline:
                             raise CaptureError("Paging did not return to a writable protocol input")
-                    self._input(f"ZA1 {token} {expected}")
+                    self._input(f"ZA1 {token} {expected}", allow_vm_read=True)
                     if capture.complete:
                         previous = snap
                         while time.monotonic() < deadline:
@@ -346,8 +514,13 @@ class RunnerBridge:
                             previous = done
                             ready_rows = [i for i, row in enumerate(done["rows"]) if ready_rc(row) == 0]
                             frame_rows = [i for i, row in enumerate(done["rows"]) if f"ZM1 {token} " in row]
+                            ack_text = f"ZA1 {token} {expected}"
+                            ack_rows = [i for i, row in enumerate(done["rows"])
+                                        if row.strip() == ack_text]
+                            ack_return = (len(ack_rows) == 1
+                                          and any(index > ack_rows[0] for index in ready_rows))
                             if (fresh and done["state"] == "cms_ready" and self.input_field(done)
-                                    and ready_rows and (page_cleared or
+                                    and ready_rows and (page_cleared or ack_return or
                                     (frame_rows and max(ready_rows) > max(frame_rows)))):
                                 self.completed_token = token
                                 s.completed_capture_token = token
@@ -362,13 +535,13 @@ class RunnerBridge:
                                         "frames_verified": capture.next_seq,
                                         "screens_observed": len(snapshots)}
                             if done["state"] in {"more", "holding"}:
-                                s.command("Clear")
+                                s.command("PA(2)")
                                 page_cleared = True
                         raise CaptureError("All records verified, but wrapper return to CMS Ready is unverified")
                 elif any(seq > expected for seq in available):
                     raise CaptureError("A numbered output frame was lost")
                 elif snap["state"] in {"more", "holding"}:
-                    s.command("Clear")
+                    s.command("PA(2)")
                 else:
                     s._wait_output(1)
             raise CaptureError("Capture deadline exceeded; partial output is not a complete command result")

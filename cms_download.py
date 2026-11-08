@@ -152,11 +152,12 @@ class SourceDownloader:
         self.session = session
         self.root = root
         self.reader = RunnerBridge(session, runner_name, source=SOURCE, policy=reader_command)
-        # Standard MCP sessions retain the 300-second ceiling. The standalone
-        # retained-fixture audit may explicitly opt into a longer total budget.
-        self.max_timeout = 300
+        # A source capture reads the full CMS file twice and checks metadata
+        # before and after both passes. Allow the readback enough time while
+        # bounding each individual CMS command by RunnerBridge's 900-second cap.
+        self.max_timeout = 1800
 
-    def download(self, filename, filetype, filemode, create_runner=False, timeout=300):
+    def download(self, filename, filetype, filemode, create_runner=False, timeout=1800):
         s = self.session
         with s.lock:
             evidence = []
@@ -164,10 +165,10 @@ class SourceDownloader:
                 if not s.allow_downloads or not s.allow_commands or not self.root:
                     raise ValueError('Source downloads require --allow-downloads, --allow-commands and --download-root')
                 requested = file_id(filename, filetype, filemode)
-                if (type(self.max_timeout) is not int or self.max_timeout not in (300, 900)
+                if (type(self.max_timeout) is not int or self.max_timeout != 1800
                         or type(timeout) is not int or not 30 <= timeout <= self.max_timeout
                         or type(create_runner) is not bool):
-                    raise ValueError('timeout exceeds the configured 30..300 or audit-only 30..900 budget; create_runner must be boolean')
+                    raise ValueError('timeout must be within the configured 30..1800 second budget; create_runner must be boolean')
                 root, worktree = git_root_for(self.root)
                 deadline = time.monotonic() + timeout
                 if not self.reader.verified:
@@ -183,7 +184,7 @@ class SourceDownloader:
                     remaining = int(deadline - time.monotonic())
                     if remaining < 1:
                         raise ValueError('Download deadline exceeded')
-                    result = self.reader.run(' '.join((verb, *identity)), min(300, remaining))
+                    result = self.reader.run(' '.join((verb, *identity)), min(900, remaining))
                     if not result.get('ok') or result.get('cms_rc') != 0 or not result.get('output_complete') or not result.get('integrity_verified'):
                         evidence.append({'stage': verb, **result})
                         raise ValueError('Read-only file capture failed; see sanitized evidence')

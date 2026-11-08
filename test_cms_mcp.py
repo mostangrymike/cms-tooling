@@ -236,6 +236,58 @@ class SessionTests(unittest.TestCase):
         self.assertEqual(calls.count('String("BEGIN")'), 1)
         self.assertEqual(calls.count("Enter"), 1)
 
+    def test_cp_login_here_is_explicit_and_uses_local_credentials(self):
+        rows = screen()
+        rows[0] = "Hercules Version  : 4.7.0".ljust(80)
+        rows[6] = "Device number     : 0:SYSG".ljust(80)
+        rows[7] = "Subchannel        : 0008".ljust(80)
+        rows[23] = "CP READ".ljust(80)
+        cp_read = {"state": "cp_read", "screen_kind": "hercules_banner",
+                   "rows": rows, "fields": [{"protected": False, "row": 23,
+                   "column": 1, "start_offset": 1760, "length": 139,
+                   "nondisplay": False,
+                   "empty": True}], "connected": True, "keyboard": "U",
+                   "field_layout_error": None,
+                   "cursor": {"row": 23, "column": 1, "protected": False}}
+        session = Session(credential_provider=types.SimpleNamespace(
+            load=lambda: types.SimpleNamespace(userid="MAINT", password="secret")))
+        calls = []
+        session.command = lambda action: calls.append(action)
+        session.snapshot = lambda: cp_read
+
+        result = session._cp_logon_maint(cp_read, time.monotonic() - 1,
+                                         reconnect_here=True)
+
+        self.assertEqual(result["outcome"], "cp_logon_transition_timeout")
+        self.assertIn('String("LOGON MAINT HERE")', calls)
+        self.assertNotIn('String("LOGON MAINT")', calls)
+        self.assertNotIn("secret", json.dumps(result))
+
+    def test_cp_login_resumes_only_an_empty_hidden_field_when_here_is_explicit(self):
+        rows = screen()
+        rows[0] = "Hercules Version  : 4.7.0".ljust(80)
+        rows[23] = "CP READ".ljust(80)
+        cp_password = {"state": "cp_read", "screen_kind": "guest_or_unknown",
+                       "rows": rows, "fields": [{"protected": False, "row": 23,
+                       "column": 1, "start_offset": 1760, "length": 139,
+                       "nondisplay": True, "empty": True}], "connected": True,
+                       "keyboard": "U", "field_layout_error": None,
+                       "cursor": {"row": 23, "column": 1, "protected": False}}
+        initial = {**cp_password,
+                   "cursor": {"row": 1, "column": 1, "protected": True}}
+        session = Session(credential_provider=types.SimpleNamespace(
+            load=lambda: types.SimpleNamespace(userid="MAINT", password="secret")))
+        calls = []
+        session.command = lambda action: calls.append(action)
+        session.snapshot = lambda: cp_password
+
+        result = session._cp_logon_maint(initial, time.monotonic() - 1,
+                                         reconnect_here=True)
+
+        self.assertEqual(result["outcome"], "cp_logon_transition_timeout")
+        self.assertIn('String("secret")', calls)
+        self.assertNotIn('String("LOGON MAINT HERE")', calls)
+
     def test_startup_vm_read_sends_one_enter_and_stops_at_cp_read(self):
         session = Session(allow_startup=True)
         session.em = types.SimpleNamespace(app=types.SimpleNamespace(deadline=0))
@@ -254,6 +306,72 @@ class SessionTests(unittest.TestCase):
         self.assertEqual(result["actions"], ["Enter"])
         self.assertNotIn('String("BEGIN")', calls)
         self.assertEqual(calls.count("Enter"), 1)
+
+    def test_startup_refuses_reconnect_banner_without_visible_ready(self):
+        session = Session(allow_startup=True)
+        session.em = types.SimpleNamespace(app=types.SimpleNamespace(deadline=0, close=lambda: None))
+        reconnect_rows = screen("LOGON *****")
+        reconnect_rows[5] = "RECONNECTED AT 14:03:34".ljust(80)
+        reconnect_rows[-1] = "RUNNING ********".ljust(80)
+        field = {"protected":False, "row":23, "column":1, "start_offset":1760, "length":139,
+                 "nondisplay":False, "empty":True}
+        current = {"state":"cms_ready", "screen_kind":"zvm_guest_banner",
+                   "rows":reconnect_rows, "fields":[field], "connected":True,
+                   "keyboard":"U", "formatted":True, "field_layout_error":None,
+                   "cursor":{"row":23,"column":1,"protected":False}}
+        checked = {**current, "rows":reconnect_rows.copy()}
+        screens = iter([current])
+        session.snapshot = lambda: next(screens)
+        session._wait_output = lambda seconds: True
+        calls = []
+        session.command = lambda action: calls.append(action)
+
+        result = session.startup()
+
+        self.assertFalse(result["ok"])
+        self.assertEqual(result["outcome"], "cms_ready_prompt_not_visible")
+        self.assertEqual(result["actions"], [])
+        self.assertEqual(calls, [])
+        self.assertNotIn('String("', "".join(calls))
+
+    def test_continue_more_advances_exactly_one_verified_page(self):
+        session = Session(allow_startup=True)
+        session.em = types.SimpleNamespace(app=types.SimpleNamespace(deadline=0, close=lambda: None))
+        more_rows = screen()
+        more_rows[-1] = "MORE...".ljust(80)
+        ready_rows = screen("Ready;")
+        more = {"state":"more", "rows":more_rows, "fields":[], "connected":True,
+                "keyboard":"U", "formatted":True, "field_layout_error":None}
+        ready = {**more, "state":"cms_ready", "rows":ready_rows}
+        snapshots = iter([more, ready, ready])
+        session.snapshot = lambda: next(snapshots)
+        session._wait_output = lambda seconds: True
+        calls = []
+        session.command = lambda action: calls.append(action)
+
+        result = session.continue_more()
+
+        self.assertTrue(result["ok"], result)
+        self.assertEqual(result["outcome"], "more_page_advanced")
+        self.assertFalse(result["more_remaining"])
+        self.assertEqual(result["actions"], ["PA2"])
+        self.assertEqual(calls.count("PA(2)"), 1)
+
+    def test_continue_more_refuses_other_screen_states(self):
+        session = Session(allow_startup=True)
+        session.em = types.SimpleNamespace(app=types.SimpleNamespace(deadline=0))
+        current = {"state":"cms_ready", "rows":screen("Ready;"), "fields":[],
+                   "connected":True, "keyboard":"U", "formatted":True,
+                   "field_layout_error":None}
+        session.snapshot = lambda: current
+        calls = []
+        session.command = lambda action: calls.append(action)
+
+        result = session.continue_more()
+
+        self.assertFalse(result["ok"])
+        self.assertEqual(result["outcome"], "more_boundary_not_verified")
+        self.assertEqual(calls, [])
 
     def test_startup_offline_and_explicit_device(self):
         session, fake = self.make_session()

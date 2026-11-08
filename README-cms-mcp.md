@@ -1,6 +1,6 @@
 # Local IBM z/VM CMS MCP server
 
-This version provides 18 tools, including login, startup, arbitrary
+This version provides 20 tools, including login, startup, arbitrary
 correlated CMS command capture, source downloads, general file uploads and local
 edit/review plans, over
 stdio, using one dedicated persistent s3270 process through py3270. It never
@@ -19,18 +19,37 @@ codex mcp add ibm-cms -- /absolute/path/to/cms-tooling/.venv/bin/python /absolut
 codex mcp get ibm-cms
 ```
 
+The active MCP process registers its tool list at startup. After installing a
+version that adds `cms_restart_runner`, reload the registered server once so
+the tool becomes discoverable; `codex mcp` does not provide a restart command.
+After that reload, runner capture failures can be recovered through the tool
+without restarting the MCP process or CMS VM.
+
 The absolute interpreter/script paths avoid dependence on Codex's working
 directory. `s3270` must be on the MCP process's PATH. The operator-authorized
 registration uses `--allow-login --allow-startup --allow-commands
---allow-arbitrary-commands --allow-downloads --allow-local-edits
+--allow-input --allow-arbitrary-commands --allow-downloads --allow-local-edits
 --allow-create-only-upload --allow-uploads`, plus configured download/upload
 roots and the owner-only credential file. Per-tool `approval_mode = "auto"`
 applies to command capture, download, upload, and runner preparation. It leaves
-`--allow-input` and `--allow-query-links` disabled. A new command helper must be
-created with `create=true` and source-verified because the runner source changed.
-The registered `tool_timeout_sec` is 360 seconds to accommodate the server's
-maximum 300-second command deadline. The configured helper is source-verified
-again by `cms_prepare_runner` in every new terminal session.
+`--allow-query-links` disabled. The active M272 registration enables the
+server-specific `--allow-input` flag under the operator's standing
+authorization. A new command helper must be created with `create=true` and
+source-verified because the runner source changed.
+The configured helper is source-verified again by `cms_prepare_runner` in every
+new terminal session. Configure `mcp_servers.ibm-cms.tool_timeout_sec = 2100`
+so the Codex client allows a full 1800-second readback plus startup and
+serialization margin. Restart Codex CLI after changing the source or this
+setting to load the updated tool.
+
+For the active M272 recovery, the registered `cms-mcp` wrapper prepends a local
+s3270 4.5ga6 build whose IND$FILE startup window is 90 seconds. IBM documents
+that the automatic `MORE...` advance delay depends on terminal settings. On this
+target the page had remained for about a minute, beyond stock s3270's 30-second
+DFT-start deadline. The transfer synchronizer now sends one Clear for each new,
+formatted MORE/HOLDING page, then waits through the transient blank display for
+the next readable page. This local build is for the plain loopback TN3270
+endpoint and is not required for other hosts.
 
 The TN3270 endpoint is fixed to `127.0.0.1:3271`. The default terminal selector
 remains `0200@`. Set server `--device auto` to let Hercules assign an available
@@ -48,6 +67,11 @@ console, as observed in the live pool smoke test; use a configured terminal grou
 if automation must be restricted to designated devices. Pool connection and
 guest login are separate checks. No terminal groups are created by this tooling.
 
+An experimental direct TN3270 transport is available in `tnz_transport.py`.
+It uses IBM's pure-Python `tnz`/ATI stack and is intentionally not selected by
+the MCP server yet; the existing s3270 backend remains the production path until
+the direct screen/field compatibility tests are complete.
+
 ## Tools
 
 | Tool | Behavior |
@@ -55,15 +79,17 @@ guest login are separate checks. No terminal groups are created by this tooling.
 | `cms_connect(device=None, timeout=10)` | Spawn s3270 using the configured terminal selector, wait for 3270 mode and inspect the guest without typing anything. |
 | `cms_screen()` | Atomic saved screen: 24 rows of 80 characters, 1-based cursor, keyboard/format status and field metadata. |
 | `cms_status()` | Disconnected status or a fresh screen with heuristic state classification. |
-| `cms_send(action, …)` | One validated terminal action; disabled in the initial registration. |
-| `cms_login(timeout=30)` | One-shot local-credential login through the verified combined guest form or exact CP command menu for MAINT; separate `--allow-login` flag required. |
-| `cms_startup(timeout=30, verify_cms=False, begin_vm=False)` | Continue verified startup; `begin_vm=True` sends one lowercase `b` at the exact empty VM READ field; optional fixed read-only CMS verification. Requires `--allow-startup`. |
+| `cms_send(action, …)` | One validated terminal action; enabled in the active M272 registration by the CMS server's `--allow-input` argument. |
+| `cms_login(timeout=30, reconnect_here=False)` | One-shot local-credential login through the verified combined guest form or exact CP command menu for MAINT; `reconnect_here=True` adds CP's HERE operand to reconnect an already logged-on MAINT session at this terminal. Separate `--allow-login` flag required. |
+| `cms_startup(timeout=30, verify_cms=False, begin_vm=False)` | Continue verified startup; sends one blank Enter at VM READ or BEGIN and Enter at CP READ. `begin_vm=True` sends one lowercase `b` at the exact empty VM READ field. Optional fixed read-only CMS verification. Requires `--allow-startup`. |
+| `cms_continue_more(timeout=10)` | Press PA2 once at a fresh, verified MORE/HOLDING page; report success only after a changed, formatted, readable screen. Requires `--allow-startup`; its wait can be increased to 90 seconds for a delayed page. |
 | `cms_abort_read(timeout=15)` | Send HX and Enter only at the verified empty reconnect VM READ field; requires `--allow-hx`. |
 | `cms_prepare_runner(create=False)` | Verify a configured helper, or explicitly create one new unique EXEC when create=true. |
 | `cms_command(command, timeout=120)` | Run one CMS command through the correlated runner and return complete native output plus the actual CMS-stage RC. Explicit timeout may be up to 900 seconds. Arbitrary mode has a 108-character limit and reserves `|` and `#` for framing. |
 | `cms_resolve_failed_capture(token, resume_arbitrary_commands=False)` | Acknowledge only a stable `F 0 ACK` frame followed by `Ready(12)`. It sends no CMS input, marks the old result incomplete, and defaults subsequent calls to the read-only allowlist. Repeating it with `resume_arbitrary_commands=true` restores the configured command scope. |
+| `cms_restart_runner(token)` | Recover a stable `F <sequence> ACK` frame followed by `Ready(12)`, including failures after earlier records. It sends no CMS input, leaves the MCP process and VM running, marks output incomplete, invalidates runner verification, and requires `cms_prepare_runner` before further commands. Commands remain read-only until explicitly resumed with `cms_resolve_failed_capture`. |
 | `cms_query_links(vaddr, timeout=120)` | Submit only the fixed `CP QUERY LINKS` command for one three-digit virtual address through the observed CMS input field; captures pages until a fresh Ready prompt. |
-| `cms_download(filename, filetype, filemode, create_runner=False, timeout=300)` | Capture native file records twice, verify CMS metadata, and save a new snapshot in the configured local Git worktree. |
+| `cms_download(filename, filetype, filemode, create_runner=False, timeout=1800)` | Capture native file records twice, verify CMS metadata, and save a new snapshot in the configured local Git worktree. Overall timeout is capped at 1800 seconds; each CMS capture command is capped at 900 seconds. |
 | `cms_edit_prepare(snapshot)` | Validate a local snapshot and create a separate working copy with pinned original bytes and metadata. |
 | `cms_edit_plan(edit_id)` | Validate local changes; write a full diff, native candidate bytes and an unauthorized, review-only upload plan. |
 | `cms_operation_plan(edit_id, plan_id, plan_sha256, recipe)` | Pin an existing review to a local replacement/build manifest; report missing inputs, collisions, protected targets and unverified execution gates. Never execute. |
@@ -81,18 +107,33 @@ masked and the error is exposed, rather than risking credential disclosure.
 
 States are `logo`, `login`, `password`, `cp_read`, `vm_read`, `vm_running`,
 `cms_ready`, `more`, `holding`, `xedit`, and `unknown`. A z/VM 6.3 reconnect
-screen with `RUNNING`, an unlocked keyboard, and the exact empty CMS command
-field is classified as `cms_ready`; `VM READ` remains a separate program-input
-state. A preliminary `vm_running` classification is retained when there is not
-enough guest/input-field evidence. Classification is heuristic and does not
-establish command completion. `screen_kind` distinguishes the Hercules emulator
-banner from a z/VM guest login/reconnect banner.
+screen with `RUNNING` and an empty field remains `vm_running`; only a visible
+`Ready;` prompt is classified as `cms_ready`. `VM READ` remains a separate
+program-input state. Classification is heuristic and does not establish command
+completion. `screen_kind` distinguishes the Hercules emulator banner from a
+z/VM guest login/reconnect banner.
+
+IBM documents `MORE...` as a full output area with more information pending.
+The next screen appears after a terminal-configured pause; Clear or PA2 requests
+it immediately, while Enter changes the status to HOLDING.
+`cms_continue_more` sends one PA2 at a verified MORE/HOLDING page and treats
+an unformatted or otherwise unreadable result as a failure, not a successful
+page advance. IBM also documents that `RUNNING` means CMS is ready for a
+command. The command runner accepts that status only with the exact empty,
+formatted z/VM reconnect field; it still requires a correlated `Ready;` result
+before reporting command completion. See [IBM z/VM V6.4 Getting Started, status
+notices](https://www.ibm.com/support/pages/zvm/library/640pdfs/64619406.pdf)
+and [IBM z/VM: Understanding the 3270 Screen](https://www.ibm.com/docs/en/zvm/7.3.0?topic=shell-understanding-3270-screen), which documents MORE, HOLDING and the terminal-configured pause.
 Screen/status observations leave `cms_command_complete` null. A successful
 `cms_command` sets it true only after verified capture and a fresh wrapper Ready.
 
-After the operator authorizes input, a future registration can add
-`--allow-input` to the server arguments. This enables `String`, `Enter`, `Clear`,
-`PF(1..24)`, `PA(1..3)`, `Home`, `Tab`, `BackTab`, `EraseInput`, `Reset`, and
+Codex CLI has no top-level `--allow-input` option. The Python MCP server has a
+separate `cms_mcp.py --allow-input` flag, passed in the server argument list.
+The active M272 registration enables it under the operator's standing CMS
+authorization. `cms_send` still accepts only one declared terminal action per
+call. M272 also uses the observed-page `cms_continue_more` tool. The
+server-only flag enables `String`, `Enter`, `Clear`, `PF(1..24)`, `PA(1..3)`,
+`Home`, `Tab`, `BackTab`, `EraseInput`, `Reset`, and
 `MoveCursor`. There is no arbitrary action/macro/shell/transfer interface.
 `String` takes printable ASCII without backslash action escapes and does not
 press Enter. Use `number` for PF/PA and 1-based `row`/`column` for MoveCursor.
@@ -106,8 +147,11 @@ resynchronize; if it confirms the terminal is connected, the same s3270 session
 is kept open and the error includes the sanitized screen, trace and stderr. The
 session is terminated only if s3270 has exited or a complete connected screen
 cannot be recovered. A preserved session may still have a helper waiting for
-input or acknowledgement; use `cms_resolve_failed_capture` only when its exact
-failed-frame and Ready boundary are visible before another command.
+input or acknowledgement; use `cms_restart_runner` only when its exact
+`F <sequence> ACK` frame and `Ready(12)` boundary are visible and stable. This
+acknowledges the lost capture without claiming completion. Then run
+`cms_prepare_runner` to reverify the helper source. The MCP process and CMS VM
+are not restarted.
 
 Avoid `Snap(Wait,...,Output)` with the installed s3270 4.5ga6: a live passive
 observation triggered SIGSEGV in its `snap_save` / `set_output_needed` path on
@@ -215,7 +259,7 @@ verification; the earlier live workflow review artifacts remain in `cms-sources`
 
 Unit tests use synthetic/recorded screens, a fake emulator, and one disconnected
 local s3270 process. Protocol validation initializes the real MCP stdio server,
-checks all 18 tools and verifies that input/login/startup/commands/link
+checks all 20 tools and verifies that input/login/startup/commands/link
 queries/downloads, local edits and create-only upload remain disabled by default. Codex
 discovery validation uses `codex app-server` catalog discovery without a model
 turn or any terminal connection. It may require local sandbox approval.
@@ -325,17 +369,18 @@ prompt before implementing correlated CMS command output and return codes.
 
 `cms_startup` is separately enabled and accepts no arbitrary command text. It
 requires a verified CP/VM READ state and exact empty 139-character input at row
-23, column 1, with the recorded logon/reconnect marker or exact startup banner.
+23, column 1, with the recorded logon marker or exact startup banner.
 It verifies the cursor and field again before input. It sends one Enter at a
 verified VM READ, lowercase `b` plus Enter only when explicitly requested with
 `begin_vm=True`, or BEGIN plus Enter at CP READ, at most once per call. The `b`
 path verifies the character using an internal boolean comparison against the
 raw screen buffer; neither the value nor raw buffer is returned in diagnostics.
-It does not clear input or perform paging. A z/VM reconnect `RUNNING` screen
-with the exact empty CMS command field is already command-ready and does not
-trigger startup input. The fixed CMSLEVEL probe remains limited to its
-previously verified startup boundary. A Ready observation after fresh host
-output is distinct from verifying a CMS command return code.
+It does not clear input or perform paging. A z/VM reconnect banner with
+`RUNNING` and an empty field is not accepted as CMS Ready and does not trigger
+startup input. Require a visible `Ready;` prompt before CMS commands or
+transfers. The fixed CMSLEVEL probe remains limited to its previously verified
+startup boundary. A Ready observation after fresh host output is distinct from
+verifying a CMS command return code.
 
 The successful fixed `QUERY CMSLEVEL` diagnostic returned `CMS Level 27, Service
 Level 1302` followed by a new `Ready;` prompt. See
@@ -370,6 +415,13 @@ completion. They then wait for a fresh CMS Ready and an empty command field;
 transfer completion alone does not establish terminal readiness. Each transfer
 also positions and verifies the input cursor. Terminal actions otherwise keep
 AidWait disabled.
+
+Runner preparation allows up to 240 seconds so the M272 emulator's 90-second
+IND$FILE startup window and bounded MORE-page synchronization can complete
+before the operation deadline. If DFT returns a file but the screen does not
+return to CMS Ready, preparation still compares the received source and reports
+`source_verified` separately from `ready_verified`; CMS commands remain blocked
+until a fresh input boundary is observed.
 
 `--allow-arbitrary-commands` removes the allowlist while preserving complete
 nonce-correlated output capture and the actual CMS-stage return code. Commands
@@ -452,8 +504,9 @@ capture also checks the existing framing, checksum and CMS RC protocol. This is
 a consistency check, not an atomic snapshot against other guest writers.
 Fixed and variable records are represented without text-mode transfer conversion;
 empty records, duplicate records and trailing blanks are retained. Limits are
-4096 records, 4096 bytes per record and 1 MiB total, with a 300-second overall
-download deadline. Source with locally known credential values is not exported.
+4096 records, 4096 bytes per record and 1 MiB total, with an 1800-second overall
+download deadline. Each CMS metadata/read command has a 900-second ceiling.
+Source with locally known credential values is not exported.
 
 A new `snapshot-<random-id>` directory contains `records.ebcdic`, a manifest with
 CMS identity/RECFM/LRECL/date/disk label, record lengths, SHA-256 hashes and capture
