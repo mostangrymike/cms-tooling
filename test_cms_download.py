@@ -175,7 +175,6 @@ class DownloadTests(unittest.TestCase):
 
     def test_long_download_budget_keeps_each_capture_bounded(self):
         _,d,_=self.service()
-        d.max_timeout=900
         run=d.reader.run
         budgets=[]
         elapsed=iter((0,1,200,400,401))
@@ -184,13 +183,12 @@ class DownloadTests(unittest.TestCase):
             return run(command,timeout)
         d.reader.run=timed_run
         with patch('cms_download.time.monotonic',side_effect=lambda:next(elapsed)):
-            result=d.download('TEST','EXEC','A',timeout=900)
+            result=d.download('TEST','EXEC','A',timeout=1800)
         self.assertTrue(result['ok'],result)
-        self.assertEqual(budgets,[300]*4)
+        self.assertEqual(budgets,[900]*4)
 
     def test_exhausted_total_budget_stops_before_next_read(self):
         _,d,calls=self.service()
-        d.max_timeout=900
         with patch('cms_download.time.monotonic',side_effect=(0,1,901)):
             result=d.download('TEST','EXEC','A',timeout=900)
         self.assertFalse(result['ok'])
@@ -200,13 +198,15 @@ class DownloadTests(unittest.TestCase):
 
     def test_download_budget_validation_precedes_terminal_activity(self):
         _,d,calls=self.service()
-        for timeout in (True,29,901,900.0):
+        for timeout in (True,29,1801,1800.0):
             self.assertFalse(d.download('TEST','EXEC','A',timeout=timeout)['ok'])
         self.assertEqual(calls,[])
 
-    def test_standard_download_cannot_request_audit_only_budget(self):
+    def test_download_budget_cannot_be_configured_above_the_cap(self):
         _,d,calls=self.service()
-        self.assertFalse(d.download('TEST','EXEC','A',timeout=900)['ok'])
+        self.assertEqual(d.max_timeout,1800)
+        d.max_timeout=1801
+        self.assertFalse(d.download('TEST','EXEC','A',timeout=30)['ok'])
         self.assertEqual(calls,[])
 
     def test_local_write_failure_removes_only_new_partial_snapshot(self):

@@ -224,7 +224,8 @@ class SessionTests(unittest.TestCase):
         rows[5] = "RECONNECTED AT 14:03:34".ljust(80)
         rows[23] = ("CP READ" if state == "cp_read" else "VM READ").ljust(80)
         return {"state": state, "rows": rows,
-                "fields": [{"protected": False, "row": 23, "column": 1, "length": 139,
+                "fields": [{"protected": False, "row": 23, "column": 1,
+                            "start_offset": 1760, "length": 139,
                             "nondisplay": False, "empty": True}],
                 "connected": True, "keyboard": "U", "field_layout_error": None,
                 "cursor": {"row": 23, "column": 1, "protected": False}}

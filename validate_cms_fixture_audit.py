@@ -240,10 +240,9 @@ def main():
                     raise ValueError('Native MODULE differs from prior output hash')
                 return result
             adapter.download = download
-        # Keep the standard default and per-capture limit; allow up to 900s for
-        # metadata plus two complete native reads and matching final metadata.
+        # The downloader owns a fixed 1800-second overall budget; each
+        # metadata/read capture is capped at 900 seconds by the reader bridge.
         adapter.download_timeout = 900
-        session.downloader.max_timeout = 900
         audit(adapter, journal, previous, retained)
     except BaseException as exc:
         journal.data.update(passed=False, error_type=type(exc).__name__,
