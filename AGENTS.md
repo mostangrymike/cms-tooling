@@ -189,10 +189,13 @@
   execution_implemented=false, replacement_safe=false and no host operations.
   Supplied writer-exclusion/rollback statements are not verified authority.
 - `build_cms_tooling.py` performs complete offline distribution validation in a
-  temporary extracted copy. Keep its explicit source inventory free of legacy
-  pipelines, credentials, live evidence and CMS source/edit snapshots. Portable
-  tests use sanitized fixtures under `fixtures/`; do not restore dependencies on
-  machine-local capture files. Build artifacts and source distribution hashes
+  temporary extracted copy. Its manifest is derived: explicit support files and
+  entry points, then local imports by AST. Keep legacy pipelines, credentials,
+  live evidence and CMS source/edit snapshots out of the bundle only with a
+  written reason in `EXCLUDED_SOURCES`; a tracked module that is neither
+  reachable nor excluded fails the build. Portable tests use sanitized fixtures
+  under `fixtures/`; do not restore dependencies on machine-local capture files.
+  Build artifacts and source distribution hashes
   do not establish CMS target qualification or authorize uploads/builds.
 - `cms_rehearsal.py` is an offline symbolic fail-stop model, not an executor.
   Revalidate the exact operation hash and all bound local source artifacts first.

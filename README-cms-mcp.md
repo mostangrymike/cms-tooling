@@ -244,15 +244,22 @@ and automatic terminal configuration while disconnected, verifies uploads are
 disabled, and runs the complete local edit/review demo against a synthetic
 snapshot in a temporary Git repository. No guest connection is made.
 
-The distribution uses an explicit source list. Legacy pipelines containing
-embedded credentials, local captures, downloaded snapshots, edit workspaces,
-caches and prior builds are excluded. They remain on disk. Tests use portable,
-sanitized screen fixtures under `fixtures/`, not personal live-evidence files.
-The build's temporary review paths are diagnostic only and are discarded after
-verification; the earlier live workflow review artifacts remain in `cms-sources`.
+The distribution manifest is derived, not hand-maintained. `build_cms_tooling.py`
+names the support files and the Python entry points, then follows local imports
+with `ast` to collect every module they need. A tracked Python module that is
+neither reachable nor listed in `EXCLUDED_SOURCES` with a reason fails the build,
+as does an exclusion that is actually imported or that names an untracked file.
+The report records both the resolved file list and the exclusion reasons.
+
+Legacy pipelines containing embedded credentials, local captures, downloaded
+snapshots, edit workspaces, caches and prior builds are excluded. They remain on
+disk. Tests use portable, sanitized screen fixtures under `fixtures/`, not
+personal live-evidence files. The build's temporary review paths are diagnostic
+only and are discarded after verification; the earlier live workflow review
+artifacts remain in `cms-sources`.
 
 ```sh
-.venv/bin/python -B -m unittest -v test_cms_policy test_cms_mcp test_cms_login test_cms_startup test_cms_capture test_cms_commands test_cms_download test_cms_edit test_cms_upload test_cms_link_query test_cms_operations
+.venv/bin/python -B -m unittest -v test_cms_build test_cms_policy test_cms_mcp test_cms_login test_cms_startup test_cms_capture test_cms_commands test_cms_download test_cms_edit test_cms_upload test_cms_link_query test_cms_operations
 .venv/bin/python -B validate_cms_mcp.py
 .venv/bin/python -B verify_codex_cms.py
 ```

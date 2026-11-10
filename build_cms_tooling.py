@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import argparse
+import ast
 from datetime import datetime, timezone
 import gzip
 import hashlib
@@ -18,21 +19,135 @@ import tarfile
 import tempfile
 
 
-SOURCE_FILES = (
+#: Non-Python files the distribution promises to ship.  Everything else is
+#: reached by following imports from the entry points below.
+SUPPORT_FILES = (
     "AGENTS.md", ".gitignore", "README.md", "MIGRATION.md", "README-cms-mcp.md", "VALIDATION-cms-mcp.md", "PIPELINE-READINESS.md",
     "V1-PROGRESS.md", "CMS-C-RECIPE.md",
-    "requirements-cms-mcp.txt", "ZMCPRUN.EXEC", "ZMCPGET.EXEC", "ZMCPQUAL.EXEC",
-    "cms_mcp.py", "cms_policy.py", "cms_capture.py", "cms_commands.py", "cms_credentials.py", "cms_fixture_output.py", "ZMCPOUT.EXEC",
-    "tnz_transport.py",
-    "cms_download.py", "cms_edit.py", "cms_upload.py", "cms_link_query.py", "cms_operations.py", "cms_rehearsal.py", "cms_native_review.py",
-    "diagnose_cms.py", "verify_codex_cms.py", "build_cms_tooling.py", "validate_cms_compiler.py", "validate_cms_fixture.py", "validate_cms_fixture_audit.py",
+    "requirements-cms-mcp.txt", "ZMCPRUN.EXEC", "ZMCPGET.EXEC", "ZMCPQUAL.EXEC", "ZMCPOUT.EXEC",
     "fixtures/README.md", "fixtures/terminal-screens.json",
     "fixtures/qualification/baseline/ZTQUAL.C", "fixtures/qualification/candidate/ZTQUAL.C",
     "ci/cms-tooling.yml",
+)
+
+#: Python files the distribution deliberately exposes.  Local modules they
+#: import are added transitively, so a new dependency cannot be forgotten.
+ENTRY_POINTS = (
+    "build_cms_tooling.py", "cms_mcp.py", "diagnose_cms.py", "verify_codex_cms.py",
+    "cms_native_review.py", "cms_rehearsal.py",
 ) + tuple(f"validate_cms_{name}.py" for name in ("mcp", "login", "commands", "download", "edit", "upload", "operations", "rehearsal", "gdisk")) + tuple(
     f"test_cms_{name}.py" for name in
-    ("mcp", "policy", "login", "startup", "capture", "commands", "download", "edit", "upload", "link_query", "fixtures", "operations", "rehearsal", "native_review", "compiler", "fixture", "fixture_audit", "fixture_output")
+    ("build", "mcp", "policy", "login", "startup", "capture", "commands", "download", "edit", "upload", "link_query", "fixtures", "operations", "rehearsal", "native_review", "compiler", "fixture", "fixture_audit", "fixture_output")
 )
+
+#: Every tracked Python module that is deliberately not shipped, with the
+#: reason it stays out.  The build fails when a tracked module is missing from
+#: both this table and the import closure, so drift is a build error instead of
+#: a silent omission.
+EXCLUDED_SOURCES = {
+    "cms_ftpput.py": "Legacy CMS-to-FTP upload helper for the retired pipeline; no packaged code imports it.",
+    "cms_telnet_driver.py": "Line-mode Telnet driver documented in TELNET-DRIVER.md; the supported bundle uses the reviewed py3270/tnz transport.",
+    "test_cms_telnet_driver.py": "Offline tests for the excluded line-mode driver.",
+    "github_tls_bridge.py": "Host-side plain-HTTP to HTTPS bridge process; deployed on the workstation, never inside the guest tooling bundle.",
+    "s3270_session.py": "Ad-hoc pexpect s3270 scratch helper, superseded by tnz_transport and the Session emulator path.",
+    "telnet_cms.py": "Early line-mode prototype, superseded by cms_telnet_driver.py.",
+}
+
+
+def tracked_python(root):
+    """Return tracked top-level module names, or None outside a Git work tree.
+
+    Git is authoritative when present: it also lets the caller notice an
+    exclusion that names a file nobody tracks.  Outside a work tree the caller
+    falls back to the files that actually exist.
+    """
+    result = subprocess.run(['git', '-C', str(root), 'ls-files', '-z', '--', '*.py'],
+                            capture_output=True)
+    if result.returncode:
+        return None
+    return sorted(name for name in result.stdout.decode().split('\0') if name)
+
+
+def local_sources(root):
+    """Return (importable, required, authoritative) top-level Python sources.
+
+    `importable` also includes an untracked file at the top level, so a module
+    that exists on disk is never silently dropped from the bundle.  `required`
+    is the authoritative set the build must account for: Git's tracked files
+    when available, otherwise the files on disk.  `authoritative` says whether
+    an exclusion that names an absent file is a real error or just a source
+    tree without Git metadata.
+    """
+    root = Path(root)
+    on_disk = {path.name for path in root.glob('*.py')}
+    tracked = tracked_python(root)
+    if tracked is None:
+        return sorted(on_disk), sorted(on_disk), False
+    nested = sorted(name for name in tracked if '/' in name)
+    if nested:
+        raise ValueError("Nested Python sources cannot enter the flat bundle: " + ", ".join(nested))
+    return sorted(set(tracked) | on_disk), tracked, True
+
+
+def imported_modules(path):
+    """Top-level module names imported anywhere in one source file."""
+    tree = ast.parse(Path(path).read_text(encoding='utf-8'))
+    names = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            names.update(alias.name.split('.')[0] for alias in node.names)
+        elif isinstance(node, ast.ImportFrom):
+            if node.level:
+                raise ValueError(f"Relative import cannot survive the flat bundle: {path}")
+            if node.module:
+                names.add(node.module.split('.')[0])
+    return names
+
+
+def source_files(root, entry_points=ENTRY_POINTS, support_files=SUPPORT_FILES,
+                 excluded=EXCLUDED_SOURCES):
+    """Resolve the explicit distribution manifest from the import graph.
+
+    Returns support files plus every local module reachable from the entry
+    points.  Raises ValueError instead of silently shipping an incomplete
+    bundle: a tracked module that is neither imported nor explicitly excluded
+    fails the build, as does an exclusion that is actually imported or that
+    names a file Git does not track.
+    """
+    root = Path(root)
+    files = set(support_files)
+    for name in files:
+        if not (root / name).is_file():
+            raise ValueError(f"Distribution support file is missing: {name}")
+    if any(not reason.strip() for reason in excluded.values()):
+        raise ValueError("Every excluded source needs a non-empty reason")
+
+    importable, required, authoritative = local_sources(root)
+    reached = set()
+    pending = list(entry_points)
+    while pending:
+        name = pending.pop()
+        if name in reached:
+            continue
+        if not (root / name).is_file():
+            raise ValueError(f"Distribution entry point is missing: {name}")
+        reached.add(name)
+        for module in imported_modules(root / name):
+            candidate = module + '.py'
+            if candidate in importable and candidate not in reached:
+                pending.append(candidate)
+
+    unknown = sorted(set(required) - reached - set(excluded))
+    if unknown:
+        raise ValueError("Tracked Python modules are neither reachable from an entry point "
+                         "nor explicitly excluded with a reason: " + ", ".join(unknown))
+    imported = sorted(set(excluded) & reached)
+    if imported:
+        raise ValueError("Excluded source is imported by a bundled module: " + ", ".join(imported))
+    untracked = sorted(set(excluded) - set(required))
+    if untracked and authoritative:
+        raise ValueError("Exclusion names an untracked source: " + ", ".join(untracked))
+    return tuple(sorted(files | reached))
 
 UNIT_CHECK = """
 import json, unittest
@@ -65,7 +180,7 @@ def digest(payload):
 
 def source_payloads(root, credential_file=None):
     payloads = {}
-    for name in SOURCE_FILES:
+    for name in source_files(root):
         path = root / name
         if any(p.is_symlink() for p in (path, *path.parents)) or not path.is_file():
             raise ValueError(f"Distribution source must be a regular non-symlink file: {name}")
@@ -123,6 +238,7 @@ def build(output_root, credential_file=None):
     report = {'schema': 'cms-tooling-offline-build-v1', 'passed': False,
               'bundle': str(bundle), 'bundle_sha256': digest(bundle.read_bytes()),
               'source_file_count': len(payloads), 'source_manifest': manifest,
+              'excluded_sources': dict(EXCLUDED_SOURCES),
               'known_credential_scan': 'passed' if credential_file else 'not_requested',
               'runtime': {'python': sys.version, 'platform': platform.platform(),
                           'mcp': version('mcp'), 'py3270': version('py3270'),
