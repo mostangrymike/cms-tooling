@@ -1,2 +1,6 @@
 mcp==1.30.0
 py3270==0.3.5
+tnz==0.6.8
+ebcdic==2.0.1
+telnetlib3==5.0.2
+pexpect==4.9.0

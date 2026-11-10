@@ -24,9 +24,9 @@ class CreateOnlyUploader:
 
     def upload(self, edit_id, plan_id, plan_sha256, target, candidate_sha256, timeout=120):
         s = self.session
-        if not s.allow_create_only_upload:
+        if not s.caps.create_only_upload:
             return {"ok": False, "message": "Create-only upload requires --allow-create-only-upload"}
-        if not s.allow_commands or not s.runner.verified:
+        if not s.caps.commands or not s.runner.verified:
             return {"ok": False, "message": "Verify the configured read-only runner before upload"}
         if not isinstance(edit_id, str) or not re.fullmatch(r"edit-[0-9a-f]{24}", edit_id):
             return {"ok": False, "message": "Invalid generated edit identifier"}
@@ -157,9 +157,9 @@ class FileUploader:
     def upload(self, source_path, filename, filetype, filemode, *, mode="ascii",
                recfm="fixed", lrecl=80, overwrite_existing=False, timeout=120):
         s = self.session
-        if not s.allow_uploads:
+        if not s.caps.uploads:
             return {"ok": False, "message": "File uploads require --allow-uploads"}
-        if not s.allow_commands or not s.runner.verified:
+        if not s.caps.commands or not s.runner.verified:
             return {"ok": False, "message": "Verify the configured command runner before upload"}
         if type(overwrite_existing) is not bool:
             return {"ok": False, "message": "overwrite_existing must be boolean"}
@@ -209,6 +209,10 @@ class FileUploader:
 
         target = " ".join(identity)
         attempted = False
+        # Correlated CMS captures can cross several VM READ/Ready transitions;
+        # the old 20-second state-probe cap was shorter than those target
+        # screens took to acknowledge every frame.
+        state_timeout = min(60, max(20, timeout // 4))
 
         def work():
             nonlocal attempted
@@ -216,9 +220,11 @@ class FileUploader:
             if (root_now != root or worktree_now != worktree or source.is_symlink()
                     or not source.is_file() or source.read_bytes() != data):
                 raise CaptureError("Upload source or configured root changed before transfer")
-            state = s.runner._simple("STATE " + target, time.monotonic() + 20)
+            state = s.runner.run("STATE " + target, timeout=state_timeout)
+            if not state.get("ok"):
+                raise CaptureError("CMS target state check did not complete with correlated output and RC")
             expected_rc = 0 if overwrite_existing else 28
-            if state["rc"] != expected_rc:
+            if state.get("cms_rc") != expected_rc:
                 expectation = "an existing target" if overwrite_existing else "an absent target"
                 raise CaptureError("CMS target does not match the requested overwrite policy; expected " + expectation)
             with tempfile.TemporaryDirectory(prefix="cms_mcp_upload_") as folder:
@@ -230,8 +236,8 @@ class FileUploader:
                           f'Host=vm,Mode={mode},Exist={exist},Recfm={recfm}{lrecl_opt},BufferSize=2048)')
                 attempted = True
                 s.runner._transfer(action)
-            after = s.runner._simple("STATE " + target, time.monotonic() + 20)
-            if after["rc"] != 0:
+            after = s.runner.run("STATE " + target, timeout=state_timeout)
+            if not after.get("ok") or after.get("cms_rc") != 0:
                 raise CaptureError("Transfer completed but the CMS target is not present on the verified filemode")
             return {"target": target, "source_path": str(source),
                     "source_sha256": hashlib.sha256(data).hexdigest(),

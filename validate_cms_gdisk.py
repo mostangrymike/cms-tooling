@@ -8,18 +8,32 @@ from cms_credentials import FileCredentialProvider
 from cms_mcp import Session
 
 
+def validate_runner_name(value):
+    if not re.fullmatch(r"ZM[0-9A-F]{6}", value):
+        raise argparse.ArgumentTypeError('runner name must be ZM plus six uppercase hexadecimal digits')
+    return value
+
+
 def access_gate(observations, secrets):
     """Require exact documented geometry, mapping, known links, and unused G."""
     def rows(name):
         result = observations[name]
         if not result.get('ok') or not result.get('output_complete') or 'output_rows' not in result:
             raise ValueError('Complete correlated diagnostic output is required')
-        return result['output_rows']
+        return [re.sub(r'^\d{2}:\d{2}:\d{2}(?: |$)', '', row)
+                for row in result['output_rows']]
     owner = 'MAINT'
     for secret in sorted(secrets, key=len, reverse=True):
         if secret:
             owner = re.sub(re.escape(secret), lambda match: '*' * len(match[0]), owner, flags=re.I)
-    virtual = [row for row in rows('virtual') if row.startswith('DASD 0600 ')]
+    virtual_rows = []
+    for row in rows('virtual'):
+        if re.fullmatch(r'[0-9A-F]', row) and virtual_rows and re.search(
+                r'SUBCHANNEL = [0-9A-F]{3}$', virtual_rows[-1]):
+            virtual_rows[-1] += row
+        else:
+            virtual_rows.append(row)
+    virtual = [row for row in virtual_rows if row.startswith('DASD 0600 ')]
     if len(virtual) != 1 or not re.fullmatch(
             r'DASD 0600 3390 VMCOM1 R/W\s+1600 CYL ON DASD\s+0127 SUBCHANNEL = [0-9A-F]{4}', virtual[0]):
         raise ValueError('Virtual 0600 is not the exact documented existing disk')
@@ -31,6 +45,8 @@ def access_gate(observations, secrets):
     volume = rows('volume')
     links = []
     for row in volume:
+        if not row.strip():
+            continue
         if row.startswith('DASD '):
             continue
         for entry in row.split(','):
@@ -56,7 +72,7 @@ def access_gate(observations, secrets):
 def validate(args):
     provider = FileCredentialProvider(args.credential_file)
     session = Session(allow_login=True, allow_startup=True, allow_query_links=True,
-                      allow_commands=args.access_existing_g, runner_name='ZM537EF1',
+                      allow_commands=args.access_existing_g, runner_name=args.runner_name,
                       credential_provider=provider)
     evidence = {'purpose': __doc__, 'observations': {}, 'disk_changes_performed': False,
                 'source_replacement_performed': False}
@@ -137,7 +153,11 @@ def main():
     parser.add_argument('--output', type=Path, required=True)
     parser.add_argument('--access-existing-g', action='store_true',
         help='Explicitly assign verified existing 0600 to unused G; never LINK, FORMAT, replace or erase')
+    parser.add_argument('--runner-name', type=validate_runner_name,
+        help='Existing command helper to source-verify for access postchecks')
     args = parser.parse_args()
+    if args.access_existing_g and not args.runner_name:
+        parser.error('--runner-name is required with --access-existing-g')
     result = validate(args)
     print(json.dumps({'observation_complete': result.get('observation_complete', False),
                       'G_access_verified': result.get('G_access_verified', False),

@@ -46,13 +46,13 @@ class CompilerObservationTests(unittest.TestCase):
         self.assertFalse(any('String("EXEC ' in action or 'Transfer(' in action for action in fake.calls))
         self.assertTrue(session.disconnect()['terminated'])
 
-    def test_paged_state_captures_more_before_clear_and_fresh_ready(self):
+    def test_paged_state_captures_more_before_pa2_and_fresh_ready(self):
         class Paged(CommandEmulator):
             def exec_command(self, action):
                 result = super().exec_command(action)
                 if action == b'Enter':
                     self.rows = screen(self.queued, ' ' * 60 + 'MORE...')
-                elif action == b'Clear':
+                elif action == b'PA(2)':
                     self.rows = screen('DMSSTT002E File not found', ' ' * 60 + 'RUNNING')
                     self.rows[2] = 'Ready(00028);'.ljust(80)
                 return result
@@ -63,32 +63,34 @@ class CompilerObservationTests(unittest.TestCase):
         self.assertTrue(result['ok'], result)
         self.assertEqual(result['terminal_ready_rc'], 28)
         self.assertEqual(result['snapshots'][0]['state'], 'more')
-        self.assertEqual(fake.calls.count('Clear'), 1)
+        self.assertEqual(fake.calls.count('PA(2)'), 1)
         session.disconnect()
 
-    def test_missing_new_ready_fails_and_terminates_without_retry(self):
+    def test_missing_new_ready_fails_and_preserves_readable_session_without_retry(self):
         fake = CommandEmulator()
         session = Session(factory=lambda: fake, allow_commands=True)
         session.connect('0200@')
         session.runner._simple = Mock(side_effect=TimeoutError('No correlated Ready'))
         result = observe(session, 'disks')
         self.assertFalse(result['ok'])
-        self.assertTrue(result['session_terminated'])
+        self.assertTrue(result['session_preserved'])
+        self.assertFalse(result['session_terminated'])
         session.runner._simple.assert_called_once()
-        self.assertIsNone(session.em)
+        self.assertIsNotNone(session.em)
+        self.assertFalse(fake.closed)
 
-    def test_repeated_held_page_receives_one_clear_and_partial_page_has_no_rc(self):
+    def test_repeated_held_page_receives_one_pa2_and_partial_page_has_no_rc(self):
         class RepeatedPage(CommandEmulator):
-            cleared = False
+            advanced = False
             waits = 0
             def exec_command(self, action):
                 result = super().exec_command(action)
                 if action == b'Enter':
                     self.rows = screen('Ready; old unrelated command', ' ' * 60 + 'MORE...')
                     self.rows[20] = self.queued.ljust(80)
-                elif action == b'Clear':
-                    self.cleared = True
-                elif action == b'Wait(1,Output)' and self.cleared:
+                elif action == b'PA(2)':
+                    self.advanced = True
+                elif action == b'Wait(1,Output)' and self.advanced:
                     self.waits += 1
                     if self.waits == 1:
                         self.rows[-1] = (' ' * 60 + 'HOLDING').ljust(80)
@@ -106,7 +108,7 @@ class CompilerObservationTests(unittest.TestCase):
         result = observe(session, 'wrapper_F')
         self.assertTrue(result['ok'], result)
         self.assertEqual(result['terminal_ready_rc'], 28)
-        self.assertEqual(fake.calls.count('Clear'), 1)
+        self.assertEqual(fake.calls.count('PA(2)'), 1)
         self.assertEqual(fake.waits, 3)
         session.disconnect()
 

@@ -117,7 +117,7 @@ class SourceEdits:
 
     def context(self):
         s = self.session
-        if not s.allow_local_edits or not s.downloader.root:
+        if not s.caps.local_edits or not s.downloader.root:
             raise ValueError('Local edits require --allow-local-edits and --download-root')
         # Local operations must redact credentials even without any host login.
         if s.credential_provider is not None:

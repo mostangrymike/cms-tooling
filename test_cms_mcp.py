@@ -6,13 +6,16 @@ import types
 import unittest
 import queue
 import ast
+import re
 from pathlib import Path
 import subprocess
 import sys
 from test_cms_fixtures import recorded_screen
 
-from cms_mcp import (Session, PipeApp, Emulator, classify, field_layout,
+from cms_mcp import (Session, PipeApp, classify, field_layout,
                      sanitize_rows, create_server)
+from cms_terminal import S3270Terminal
+from validate_cms_mcp import EXPECTED
 
 
 def screen(text="Ready;", bottom=""):
@@ -38,8 +41,13 @@ class FakeEmulator:
         self.active = 0
         self.max_active = 0
         self.is_terminated = False
-        self.app = types.SimpleNamespace(deadline=0, stderr=bytearray(), close=self.close)
+        self.deadline = 0
+        self.stderr = bytearray()
+        self.app = types.SimpleNamespace(deadline=0, stderr=self.stderr, close=self.close)
         self.closed = False
+
+    def alive(self):
+        return not self.closed
 
     def close(self):
         self.closed = True
@@ -58,6 +66,14 @@ class FakeEmulator:
             return types.SimpleNamespace(data=[x.encode() for x in data])
         finally:
             self.active -= 1
+
+
+def terminal_stub(**attrs):
+    """A protocol-shaped terminal for paths that monkeypatch snapshot/command."""
+    values = dict(deadline=0, stderr=bytearray(), is_terminated=False,
+                  alive=lambda: True, close=lambda: None)
+    values.update(attrs)
+    return types.SimpleNamespace(**values)
 
 
 class ClassificationTests(unittest.TestCase):
@@ -87,6 +103,41 @@ class ClassificationTests(unittest.TestCase):
         self.assertTrue(all(f["protected"] for f in captured["fields"]))
         self.assertEqual(captured["cursor"], {"row": 1, "column": 1, "protected": True})
 
+    def test_zvm_guest_reconnect_banner_is_distinct_from_hercules_console(self):
+        rows = [" " * 80 for _ in range(24)]
+        rows[1] = "15:40:37 z/VM Version 6 Release 3.0, Service Level 1302".ljust(80)
+        rows[5] = "15:40:37 RECONNECTED AT 15:40:37 EST SATURDAY 10/17/26".ljust(80)
+        rows[23] = ("VM READ" + " " * 133).ljust(80)
+        result = classify(rows)
+        self.assertEqual(result["state"], "vm_read")
+        self.assertEqual(result["screen_kind"], "zvm_guest_banner")
+
+    def test_hercules_running_banner_is_observational_vm_running(self):
+        rows = [" " * 80 for _ in range(24)]
+        rows[0] = "Hercules Version  : 4.7.0".ljust(80)
+        rows[23] = "RUNNING   ********".ljust(80)
+        result = classify(rows)
+        self.assertEqual(result["state"], "vm_running")
+        self.assertEqual(result["screen_kind"], "hercules_banner")
+
+    def test_stale_password_banner_with_exact_guest_vm_read_refines_to_startup(self):
+        rows = screen()
+        rows[0] = "Hercules Version  : 4.7.0".ljust(80)
+        rows[7] = "ENTER PASSWORD (IT WILL NOT APPEAR WHEN TYPED):".ljust(80)
+        rows[13] = "LOGON AT 15:11:45 EST SATURDAY 10/17/26".ljust(80)
+        rows[23] = (" " * 60 + "VM READ VMACCOUNT").ljust(80)
+        fake = FakeEmulator(rows)
+        fake.buffer = buffer({0: "20", 1759: "00", 1899: "20", 1919: "20"})
+        fake.cursor = (22, 0)
+        session = Session(factory=lambda: fake)
+        result = session.connect("auto")["screen"]
+        self.assertEqual(result["state"], "vm_read")
+        self.assertIn("vm_read", result["indicators"])
+        editable = [field for field in result["fields"] if not field["protected"]]
+        self.assertEqual(len(editable), 1)
+        self.assertTrue(editable[0]["empty"])
+        self.assertNotIn("VMACCOUNT", json.dumps(result))
+
 
 class CapturedLoginTests(unittest.TestCase):
     def test_combined_login_form_is_not_password_prompt(self):
@@ -113,6 +164,15 @@ class RedactionTests(unittest.TestCase):
         safe = sanitize_rows(rows, field_layout(buffer()), set())
         self.assertIn("CP READ", safe[23])
         self.assertIn("*********", safe[23])
+        self.assertNotIn("VMACCOUNT", json.dumps(safe))
+
+    def test_vm_read_and_running_identifiers_are_masked(self):
+        rows = screen()
+        rows[22] = "VM READ VMACCOUNT".ljust(80)
+        rows[23] = "RUNNING VMACCOUNT".ljust(80)
+        safe = sanitize_rows(rows, field_layout(buffer()), set())
+        self.assertIn("VM READ", safe[22])
+        self.assertIn("RUNNING", safe[23])
         self.assertNotIn("VMACCOUNT", json.dumps(safe))
 
     def test_attributes_and_wrapped_field(self):
@@ -164,18 +224,19 @@ class SessionTests(unittest.TestCase):
         rows[5] = "RECONNECTED AT 14:03:34".ljust(80)
         rows[23] = ("CP READ" if state == "cp_read" else "VM READ").ljust(80)
         return {"state": state, "rows": rows,
-                "fields": [{"protected": False, "row": 23, "column": 1, "length": 139,
+                "fields": [{"protected": False, "row": 23, "column": 1,
+                            "start_offset": 1760, "length": 139,
                             "nondisplay": False, "empty": True}],
                 "connected": True, "keyboard": "U", "field_layout_error": None,
                 "cursor": {"row": 23, "column": 1, "protected": False}}
 
     def test_startup_cp_read_sends_begin_once_then_only_observes(self):
         session = Session(allow_startup=True)
-        session.em = types.SimpleNamespace(app=types.SimpleNamespace(deadline=0))
+        session.em = terminal_stub()
         cp_read = self.startup_fixture("cp_read")
         blank = self.startup_fixture("unknown")
         blank["rows"][6] = "BEGIN".ljust(80)
-        blank["rows"][23] = "RUNNING TACOTICO".ljust(80)
+        blank["rows"][23] = "RUNNING ********".ljust(80)
         screens = iter([cp_read, cp_read, blank])
         calls = []
         session.snapshot = lambda: next(screens)
@@ -190,9 +251,61 @@ class SessionTests(unittest.TestCase):
         self.assertEqual(calls.count('String("BEGIN")'), 1)
         self.assertEqual(calls.count("Enter"), 1)
 
+    def test_cp_login_here_is_explicit_and_uses_local_credentials(self):
+        rows = screen()
+        rows[0] = "Hercules Version  : 4.7.0".ljust(80)
+        rows[6] = "Device number     : 0:SYSG".ljust(80)
+        rows[7] = "Subchannel        : 0008".ljust(80)
+        rows[23] = "CP READ".ljust(80)
+        cp_read = {"state": "cp_read", "screen_kind": "hercules_banner",
+                   "rows": rows, "fields": [{"protected": False, "row": 23,
+                   "column": 1, "start_offset": 1760, "length": 139,
+                   "nondisplay": False,
+                   "empty": True}], "connected": True, "keyboard": "U",
+                   "field_layout_error": None,
+                   "cursor": {"row": 23, "column": 1, "protected": False}}
+        session = Session(credential_provider=types.SimpleNamespace(
+            load=lambda: types.SimpleNamespace(userid="MAINT", password="secret")))
+        calls = []
+        session.command = lambda action: calls.append(action)
+        session.snapshot = lambda: cp_read
+
+        result = session._cp_logon_maint(cp_read, time.monotonic() - 1,
+                                         reconnect_here=True)
+
+        self.assertEqual(result["outcome"], "cp_logon_transition_timeout")
+        self.assertIn('String("LOGON MAINT HERE")', calls)
+        self.assertNotIn('String("LOGON MAINT")', calls)
+        self.assertNotIn("secret", json.dumps(result))
+
+    def test_cp_login_resumes_only_an_empty_hidden_field_when_here_is_explicit(self):
+        rows = screen()
+        rows[0] = "Hercules Version  : 4.7.0".ljust(80)
+        rows[23] = "CP READ".ljust(80)
+        cp_password = {"state": "cp_read", "screen_kind": "guest_or_unknown",
+                       "rows": rows, "fields": [{"protected": False, "row": 23,
+                       "column": 1, "start_offset": 1760, "length": 139,
+                       "nondisplay": True, "empty": True}], "connected": True,
+                       "keyboard": "U", "field_layout_error": None,
+                       "cursor": {"row": 23, "column": 1, "protected": False}}
+        initial = {**cp_password,
+                   "cursor": {"row": 1, "column": 1, "protected": True}}
+        session = Session(credential_provider=types.SimpleNamespace(
+            load=lambda: types.SimpleNamespace(userid="MAINT", password="secret")))
+        calls = []
+        session.command = lambda action: calls.append(action)
+        session.snapshot = lambda: cp_password
+
+        result = session._cp_logon_maint(initial, time.monotonic() - 1,
+                                         reconnect_here=True)
+
+        self.assertEqual(result["outcome"], "cp_logon_transition_timeout")
+        self.assertIn('String("secret")', calls)
+        self.assertNotIn('String("LOGON MAINT HERE")', calls)
+
     def test_startup_vm_read_sends_one_enter_and_stops_at_cp_read(self):
         session = Session(allow_startup=True)
-        session.em = types.SimpleNamespace(app=types.SimpleNamespace(deadline=0))
+        session.em = terminal_stub()
         vm_read = self.startup_fixture("vm_read")
         cp_read = self.startup_fixture("cp_read")
         screens = iter([vm_read, vm_read, cp_read])
@@ -208,6 +321,72 @@ class SessionTests(unittest.TestCase):
         self.assertEqual(result["actions"], ["Enter"])
         self.assertNotIn('String("BEGIN")', calls)
         self.assertEqual(calls.count("Enter"), 1)
+
+    def test_startup_refuses_reconnect_banner_without_visible_ready(self):
+        session = Session(allow_startup=True)
+        session.em = terminal_stub()
+        reconnect_rows = screen("LOGON *****")
+        reconnect_rows[5] = "RECONNECTED AT 14:03:34".ljust(80)
+        reconnect_rows[-1] = "RUNNING ********".ljust(80)
+        field = {"protected":False, "row":23, "column":1, "start_offset":1760, "length":139,
+                 "nondisplay":False, "empty":True}
+        current = {"state":"cms_ready", "screen_kind":"zvm_guest_banner",
+                   "rows":reconnect_rows, "fields":[field], "connected":True,
+                   "keyboard":"U", "formatted":True, "field_layout_error":None,
+                   "cursor":{"row":23,"column":1,"protected":False}}
+        checked = {**current, "rows":reconnect_rows.copy()}
+        screens = iter([current])
+        session.snapshot = lambda: next(screens)
+        session._wait_output = lambda seconds: True
+        calls = []
+        session.command = lambda action: calls.append(action)
+
+        result = session.startup()
+
+        self.assertFalse(result["ok"])
+        self.assertEqual(result["outcome"], "cms_ready_prompt_not_visible")
+        self.assertEqual(result["actions"], [])
+        self.assertEqual(calls, [])
+        self.assertNotIn('String("', "".join(calls))
+
+    def test_continue_more_advances_exactly_one_verified_page(self):
+        session = Session(allow_startup=True)
+        session.em = terminal_stub()
+        more_rows = screen()
+        more_rows[-1] = "MORE...".ljust(80)
+        ready_rows = screen("Ready;")
+        more = {"state":"more", "rows":more_rows, "fields":[], "connected":True,
+                "keyboard":"U", "formatted":True, "field_layout_error":None}
+        ready = {**more, "state":"cms_ready", "rows":ready_rows}
+        snapshots = iter([more, ready, ready])
+        session.snapshot = lambda: next(snapshots)
+        session._wait_output = lambda seconds: True
+        calls = []
+        session.command = lambda action: calls.append(action)
+
+        result = session.continue_more()
+
+        self.assertTrue(result["ok"], result)
+        self.assertEqual(result["outcome"], "more_page_advanced")
+        self.assertFalse(result["more_remaining"])
+        self.assertEqual(result["actions"], ["PA2"])
+        self.assertEqual(calls.count("PA(2)"), 1)
+
+    def test_continue_more_refuses_other_screen_states(self):
+        session = Session(allow_startup=True)
+        session.em = terminal_stub()
+        current = {"state":"cms_ready", "rows":screen("Ready;"), "fields":[],
+                   "connected":True, "keyboard":"U", "formatted":True,
+                   "field_layout_error":None}
+        session.snapshot = lambda: current
+        calls = []
+        session.command = lambda action: calls.append(action)
+
+        result = session.continue_more()
+
+        self.assertFalse(result["ok"])
+        self.assertEqual(result["outcome"], "more_boundary_not_verified")
+        self.assertEqual(calls, [])
 
     def test_startup_offline_and_explicit_device(self):
         session, fake = self.make_session()
@@ -252,9 +431,10 @@ class SessionTests(unittest.TestCase):
         self.assertFalse(result["ok"])
         self.assertIn("terminal selector 0200@", result["message"])
         self.assertIn("Connection rejected", result["last_screen"]["rows"][0])
-        self.assertTrue(result["session_terminated"])
-        self.assertTrue(fake.closed)
-        self.assertIsNone(session.em)
+        self.assertTrue(result["session_preserved"])
+        self.assertFalse(result["session_terminated"])
+        self.assertFalse(fake.closed)
+        self.assertIsNotNone(session.em)
         self.assertFalse(any(action.startswith(("String", "Enter", "Clear"))
                              for action in fake.calls))
 
@@ -314,16 +494,19 @@ class SessionTests(unittest.TestCase):
         fake.rows = screen('secret"value')
         self.assertNotIn('secret\\"value', json.dumps(session.screen()))
 
-    def test_deadline_preserves_screen_and_terminates(self):
+    def test_deadline_preserves_connected_screen_and_session(self):
         session, fake = self.make_session()
         session.connect("0200@")
         fake.fail_action = "Enter"
         result = session.send("Enter")
         self.assertFalse(result["ok"])
         self.assertEqual(len(result["last_screen"]["rows"]), 24)
-        self.assertEqual(result["trace"][-1]["error_type"], "TimeoutError")
-        self.assertTrue(fake.closed)
-        self.assertIsNone(session.em)
+        self.assertEqual(result["error_type"], "TimeoutError")
+        self.assertTrue(any(item.get("error_type") == "TimeoutError" for item in result["trace"]))
+        self.assertTrue(result["session_preserved"])
+        self.assertFalse(result["session_terminated"])
+        self.assertFalse(fake.closed)
+        self.assertIsNotNone(session.em)
 
     def test_buffer_deadline_is_not_hidden(self):
         session, fake = self.make_session()
@@ -347,7 +530,7 @@ class SessionTests(unittest.TestCase):
 
     def test_actual_s3270_offline_transport_and_snapshot(self):
         # Starts a local process with no hostname; makes NO network connection.
-        session = Session(factory=lambda: Emulator(app=PipeApp()))
+        session = Session(factory=lambda: S3270Terminal())
         session.em = session.factory()
         try:
             self.assertEqual(session.em.app.sp.args[1:],
@@ -383,6 +566,13 @@ class SessionTests(unittest.TestCase):
 
 
 class ValidatorTests(unittest.TestCase):
+    def test_operator_guide_tool_inventory_matches_protocol(self):
+        guide = Path(__file__).with_name("README-cms-mcp.md").read_text()
+        documented = set(re.findall(r'^\| `(cms_[^(`]+)', guide, re.MULTILINE))
+        self.assertEqual(documented, EXPECTED)
+        self.assertIn(f"provides {len(EXPECTED)} tools", guide)
+        self.assertIn(f"checks all {len(EXPECTED)} tools", guide)
+
     def test_validators_have_no_optimization_dependent_checks(self):
         for path in Path(__file__).parent.glob('validate_cms_*.py'):
             with self.subTest(validator=path.name):
