@@ -12,8 +12,9 @@ import subprocess
 import sys
 from test_cms_fixtures import recorded_screen
 
-from cms_mcp import (Session, PipeApp, Emulator, classify, field_layout,
+from cms_mcp import (Session, PipeApp, classify, field_layout,
                      sanitize_rows, create_server)
+from cms_terminal import S3270Terminal
 from validate_cms_mcp import EXPECTED
 
 
@@ -40,8 +41,13 @@ class FakeEmulator:
         self.active = 0
         self.max_active = 0
         self.is_terminated = False
-        self.app = types.SimpleNamespace(deadline=0, stderr=bytearray(), close=self.close)
+        self.deadline = 0
+        self.stderr = bytearray()
+        self.app = types.SimpleNamespace(deadline=0, stderr=self.stderr, close=self.close)
         self.closed = False
+
+    def alive(self):
+        return not self.closed
 
     def close(self):
         self.closed = True
@@ -60,6 +66,14 @@ class FakeEmulator:
             return types.SimpleNamespace(data=[x.encode() for x in data])
         finally:
             self.active -= 1
+
+
+def terminal_stub(**attrs):
+    """A protocol-shaped terminal for paths that monkeypatch snapshot/command."""
+    values = dict(deadline=0, stderr=bytearray(), is_terminated=False,
+                  alive=lambda: True, close=lambda: None)
+    values.update(attrs)
+    return types.SimpleNamespace(**values)
 
 
 class ClassificationTests(unittest.TestCase):
@@ -217,7 +231,7 @@ class SessionTests(unittest.TestCase):
 
     def test_startup_cp_read_sends_begin_once_then_only_observes(self):
         session = Session(allow_startup=True)
-        session.em = types.SimpleNamespace(app=types.SimpleNamespace(deadline=0))
+        session.em = terminal_stub()
         cp_read = self.startup_fixture("cp_read")
         blank = self.startup_fixture("unknown")
         blank["rows"][6] = "BEGIN".ljust(80)
@@ -290,7 +304,7 @@ class SessionTests(unittest.TestCase):
 
     def test_startup_vm_read_sends_one_enter_and_stops_at_cp_read(self):
         session = Session(allow_startup=True)
-        session.em = types.SimpleNamespace(app=types.SimpleNamespace(deadline=0))
+        session.em = terminal_stub()
         vm_read = self.startup_fixture("vm_read")
         cp_read = self.startup_fixture("cp_read")
         screens = iter([vm_read, vm_read, cp_read])
@@ -309,7 +323,7 @@ class SessionTests(unittest.TestCase):
 
     def test_startup_refuses_reconnect_banner_without_visible_ready(self):
         session = Session(allow_startup=True)
-        session.em = types.SimpleNamespace(app=types.SimpleNamespace(deadline=0, close=lambda: None))
+        session.em = terminal_stub()
         reconnect_rows = screen("LOGON *****")
         reconnect_rows[5] = "RECONNECTED AT 14:03:34".ljust(80)
         reconnect_rows[-1] = "RUNNING ********".ljust(80)
@@ -336,7 +350,7 @@ class SessionTests(unittest.TestCase):
 
     def test_continue_more_advances_exactly_one_verified_page(self):
         session = Session(allow_startup=True)
-        session.em = types.SimpleNamespace(app=types.SimpleNamespace(deadline=0, close=lambda: None))
+        session.em = terminal_stub()
         more_rows = screen()
         more_rows[-1] = "MORE...".ljust(80)
         ready_rows = screen("Ready;")
@@ -359,7 +373,7 @@ class SessionTests(unittest.TestCase):
 
     def test_continue_more_refuses_other_screen_states(self):
         session = Session(allow_startup=True)
-        session.em = types.SimpleNamespace(app=types.SimpleNamespace(deadline=0))
+        session.em = terminal_stub()
         current = {"state":"cms_ready", "rows":screen("Ready;"), "fields":[],
                    "connected":True, "keyboard":"U", "formatted":True,
                    "field_layout_error":None}
@@ -515,7 +529,7 @@ class SessionTests(unittest.TestCase):
 
     def test_actual_s3270_offline_transport_and_snapshot(self):
         # Starts a local process with no hostname; makes NO network connection.
-        session = Session(factory=lambda: Emulator(app=PipeApp()))
+        session = Session(factory=lambda: S3270Terminal())
         session.em = session.factory()
         try:
             self.assertEqual(session.em.app.sp.args[1:],

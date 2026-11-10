@@ -37,7 +37,7 @@ ENTRY_POINTS = (
     "cms_native_review.py", "cms_rehearsal.py",
 ) + tuple(f"validate_cms_{name}.py" for name in ("mcp", "login", "commands", "download", "edit", "upload", "operations", "rehearsal", "gdisk")) + tuple(
     f"test_cms_{name}.py" for name in
-    ("build", "mcp", "policy", "screen", "login", "startup", "capture", "commands", "download", "edit", "upload", "link_query", "fixtures", "operations", "rehearsal", "native_review", "compiler", "fixture", "fixture_audit", "fixture_output")
+    ("build", "mcp", "policy", "screen", "terminal", "login", "startup", "capture", "commands", "download", "edit", "upload", "link_query", "fixtures", "operations", "rehearsal", "native_review", "compiler", "fixture", "fixture_audit", "fixture_output")
 )
 
 #: Every tracked Python module that is deliberately not shipped, with the

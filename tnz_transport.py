@@ -190,3 +190,8 @@ class TnzEmulator:
 
     def close(self):
         self.transport.close()
+        self.is_terminated = True
+
+    def alive(self):
+        """True while the TN3270 session can still serve a command."""
+        return not self.is_terminated and self.transport.connected

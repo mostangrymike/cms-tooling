@@ -259,7 +259,7 @@ only and are discarded after verification; the earlier live workflow review
 artifacts remain in `cms-sources`.
 
 ```sh
-.venv/bin/python -B -m unittest -v test_cms_build test_cms_policy test_cms_screen test_cms_mcp test_cms_login test_cms_startup test_cms_capture test_cms_commands test_cms_download test_cms_edit test_cms_upload test_cms_link_query test_cms_operations
+.venv/bin/python -B -m unittest -v test_cms_build test_cms_policy test_cms_screen test_cms_terminal test_cms_mcp test_cms_login test_cms_startup test_cms_capture test_cms_commands test_cms_download test_cms_edit test_cms_upload test_cms_link_query test_cms_operations
 .venv/bin/python -B validate_cms_mcp.py
 .venv/bin/python -B verify_codex_cms.py
 ```
@@ -284,6 +284,14 @@ session acts on. It imports no terminal, session, or network state, and
 `test_cms_screen.py` asserts it does not import `cms_mcp`. `cms_mcp` re-exports
 the same names for existing callers, so the server module and the other
 packaged tools share one definition of each boundary.
+
+`cms_terminal.py` is the transport contract. `Session` reads only `deadline`,
+`stderr`, `is_terminated`, `exec_command`, `alive` and `close` from its
+terminal. `S3270Terminal` adapts py3270's `Emulator` and the bounded `PipeApp`;
+`TnzEmulator` implements the same members directly. `test_cms_terminal.py`
+drives a session through a scripted terminal that has no `.app` escape hatch and
+checks both backends with `conformance_errors`, so a backend cannot drift from
+the contract the session actually uses.
 
 For an authorized download/edit review using the existing helpers:
 

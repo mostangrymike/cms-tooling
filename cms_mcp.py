@@ -7,14 +7,13 @@ import atexit
 import functools
 import inspect
 import logging
-import queue
 import re
-import shutil
-import subprocess
 import threading
 import time
 from typing import Literal
 
+# Emulator, PipeApp, and TnzEmulator stay importable here for existing callers;
+# Session itself now builds a `cms_terminal.Terminal` through `terminal()`.
 from py3270 import Emulator, CommandError
 import cms_policy
 from cms_credentials import FileCredentialProvider
@@ -26,6 +25,7 @@ from cms_screen import (ROWS, COLS, blank_vm_read_input, classify,
                         field_layout, host_display, hx_read_boundary, login_layout,
                         password_is_vm_read_startup, runner_protocol_visible,
                         sanitize_rows, tnz_login_layout)
+from cms_terminal import PipeApp, Terminal, terminal
 from tnz_transport import TnzEmulator
 
 logging.getLogger("py3270").disabled = True
@@ -40,86 +40,6 @@ def device_selector(value):
     if isinstance(value, str) and re.fullmatch(r"(?:[0-9A-Fa-f]{4}|[A-Za-z][A-Za-z0-9]{0,7})@", value):
         return value.upper()
     raise ValueError("device must be auto, a four-hex-digit address with @, or a 1..8 alphanumeric group name with @")
-
-
-class PipeApp:
-    """py3270 application transport with deadlines and drained stderr.
-
-    py3270's ordinary pipe readline is unbounded. A reader thread and queue keep
-    emulator faults from hanging MCP. After a timeout, Session attempts one
-    bounded screen capture to resynchronize before deciding whether to stop it.
-    """
-    def __init__(self):
-        executable = shutil.which("s3270")
-        if not executable:
-            raise RuntimeError("s3270 not found on PATH")
-        self.sp = subprocess.Popen(
-            # -clear works on both distro 4.1 and newer 4.5 emulators;
-            # older versions reject assignment syntax in -set arguments.
-            [executable, "-model", "2", "-clear", "aidWait", "-clear", "trace"],
-            stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-            bufsize=0,
-        )
-        self.output = queue.Queue()
-        self.stderr = bytearray()
-        self.deadline = time.monotonic() + 15
-        self.reply = []
-        self.closed = False
-        self.threads = [threading.Thread(target=self._read_stdout, daemon=True),
-                        threading.Thread(target=self._read_stderr, daemon=True)]
-        for thread in self.threads:
-            thread.start()
-
-    def _read_stdout(self):
-        while True:
-            line = self.sp.stdout.readline()
-            self.output.put(line)
-            if not line:
-                break
-
-    def _read_stderr(self):
-        while True:
-            chunk = self.sp.stderr.read(4096)
-            if not chunk:
-                break
-            self.stderr.extend(chunk)
-
-    def connect(self, host):
-        return False
-
-    def write(self, data):
-        self.reply = []
-        if self.closed or self.sp.poll() is not None:
-            raise RuntimeError("s3270 process is no longer running")
-        self.sp.stdin.write(data)
-        self.sp.stdin.flush()
-
-    def readline(self):
-        try:
-            line = self.output.get(timeout=max(0.001, self.deadline - time.monotonic()))
-        except queue.Empty:
-            raise TimeoutError("s3270 response deadline exceeded") from None
-        if not line:
-            raise RuntimeError("s3270 closed its output pipe")
-        self.reply.append(line.decode("utf-8", errors="replace").rstrip("\r\n"))
-        return line
-
-    def close(self):
-        if self.closed:
-            return self.sp.poll()
-        self.closed = True
-        if self.sp.poll() is None:
-            self.sp.terminate()
-            try:
-                self.sp.wait(timeout=2)
-            except subprocess.TimeoutExpired:
-                self.sp.kill()
-                self.sp.wait(timeout=2)
-        for thread in self.threads:
-            thread.join(timeout=1)
-        for stream in (self.sp.stdin, self.sp.stdout, self.sp.stderr):
-            stream.close()
-        return self.sp.returncode
 
 
 class Session:
@@ -140,7 +60,7 @@ class Session:
         elif flags:
             raise TypeError("pass capabilities= or allow_* flags, not both")
         self.caps = capabilities
-        self.em = None
+        self.em: Terminal | None = None
         self.default_device = device_selector(default_device)
         if transport not in {"s3270", "tnz"}:
             raise ValueError("transport must be s3270 or tnz")
@@ -164,10 +84,8 @@ class Session:
         self.credential_provider = credential_provider
         if factory is not None:
             self.factory = factory
-        elif transport == "tnz":
-            self.factory = lambda: TnzEmulator()
         else:
-            self.factory = lambda: Emulator(app=PipeApp())
+            self.factory = functools.partial(terminal, transport)
         self.secrets = set()
         self.last_screen = None
         self.trace = []
@@ -373,7 +291,7 @@ class Session:
         if self.em is not None:
             try:
                 # Closing our dedicated process only; never send LOGOFF or Clear.
-                self.em.app.close()
+                self.em.close()
             finally:
                 self.em.is_terminated = True
                 self.em = None
@@ -382,7 +300,7 @@ class Session:
         with self.lock:
             self.trace = []
             if self.em is not None:
-                self.em.app.deadline = time.monotonic() + timeout
+                self.em.deadline = time.monotonic() + timeout
             try:
                 return {"ok": True, **function()}
             except Exception as exc:
@@ -390,15 +308,14 @@ class Session:
                             "message": self.redact(str(exc)), "trace": self.trace,
                             "last_screen": self.last_screen}
                 if self.em is not None:
-                    app = self.em.app
-                    process = getattr(app, "sp", None)
-                    process_alive = process is None or process.poll() is None
+                    transport = self.em
+                    process_alive = transport.alive()
                     screen = None
                     if process_alive:
                         try:
                             # This is diagnostic/resynchronization only. Never
                             # repeat the CMS command or terminal input that failed.
-                            app.deadline = time.monotonic() + 3
+                            transport.deadline = time.monotonic() + 3
                             screen = self.snapshot()
                             evidence["failure_screen"] = screen
                         except Exception:
@@ -407,14 +324,14 @@ class Session:
                             and screen.get("row_count") == ROWS):
                         # A complete fresh screen proves the terminal pipe still
                         # works. Keep the same session open for operator recovery.
-                        app.deadline = time.monotonic() + 15
-                        evidence["emulator_stderr"] = self.redact(bytes(app.stderr).decode("utf-8", "replace"))
+                        transport.deadline = time.monotonic() + 15
+                        evidence["emulator_stderr"] = self.redact(bytes(transport.stderr).decode("utf-8", "replace"))
                         evidence["session_preserved"] = True
                         evidence["session_terminated"] = False
                         evidence["cms_command_complete"] = None
                         return {"ok": False, **evidence}
                     self._stop()
-                    evidence["emulator_stderr"] = self.redact(bytes(app.stderr).decode("utf-8", "replace"))
+                    evidence["emulator_stderr"] = self.redact(bytes(transport.stderr).decode("utf-8", "replace"))
                     evidence["session_preserved"] = False
                     evidence["session_terminated"] = True
                 return {"ok": False, **evidence}
@@ -435,7 +352,7 @@ class Session:
         def work():
             endpoint = HOST_ENDPOINT if selector == "auto" else selector + HOST_ENDPOINT
             self.em = self.factory()
-            self.em.app.deadline = time.monotonic() + timeout
+            self.em.deadline = time.monotonic() + timeout
             self.command(f"Connect({endpoint})")
             self.command(f"Wait({timeout},3270Mode)")
             screen = self.snapshot()
