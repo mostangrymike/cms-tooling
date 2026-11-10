@@ -22,7 +22,7 @@ SOURCE_FILES = (
     "AGENTS.md", ".gitignore", "README.md", "MIGRATION.md", "README-cms-mcp.md", "VALIDATION-cms-mcp.md", "PIPELINE-READINESS.md",
     "V1-PROGRESS.md", "CMS-C-RECIPE.md",
     "requirements-cms-mcp.txt", "ZMCPRUN.EXEC", "ZMCPGET.EXEC", "ZMCPQUAL.EXEC",
-    "cms_mcp.py", "cms_capture.py", "cms_commands.py", "cms_credentials.py", "cms_fixture_output.py", "ZMCPOUT.EXEC",
+    "cms_mcp.py", "cms_policy.py", "cms_capture.py", "cms_commands.py", "cms_credentials.py", "cms_fixture_output.py", "ZMCPOUT.EXEC",
     "tnz_transport.py",
     "cms_download.py", "cms_edit.py", "cms_upload.py", "cms_link_query.py", "cms_operations.py", "cms_rehearsal.py", "cms_native_review.py",
     "diagnose_cms.py", "verify_codex_cms.py", "build_cms_tooling.py", "validate_cms_compiler.py", "validate_cms_fixture.py", "validate_cms_fixture_audit.py",
@@ -31,7 +31,7 @@ SOURCE_FILES = (
     "ci/cms-tooling.yml",
 ) + tuple(f"validate_cms_{name}.py" for name in ("mcp", "login", "commands", "download", "edit", "upload", "operations", "rehearsal", "gdisk")) + tuple(
     f"test_cms_{name}.py" for name in
-    ("mcp", "login", "startup", "capture", "commands", "download", "edit", "upload", "link_query", "fixtures", "operations", "rehearsal", "native_review", "compiler", "fixture", "fixture_audit", "fixture_output")
+    ("mcp", "policy", "login", "startup", "capture", "commands", "download", "edit", "upload", "link_query", "fixtures", "operations", "rehearsal", "native_review", "compiler", "fixture", "fixture_audit", "fixture_output")
 )
 
 UNIT_CHECK = """

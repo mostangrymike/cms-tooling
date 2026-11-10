@@ -116,7 +116,7 @@ class ModuleReader:
         directory = None
         with s.lock:
             try:
-                if not s.allow_downloads or not s.allow_commands or not self.reader.verified:
+                if not s.caps.downloads or not s.caps.commands or not self.reader.verified:
                     raise ValueError('MODULE reader must be explicitly source-verified first')
                 root, worktree = git_root_for(self.root)
                 deadline = time.monotonic() + 1500

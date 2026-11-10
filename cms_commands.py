@@ -133,13 +133,13 @@ class RunnerBridge:
         default, follow-up commands remain restricted to the read-only allowlist.
         """
         s = self.session
-        if not s.allow_commands:
+        if not s.caps.commands:
             return {"ok": False, "message": "Command recovery requires --allow-commands"}
         if not isinstance(token, str) or not re.fullmatch(r"[0-9A-F]{16}", token):
             return {"ok": False, "message": "Supply the exact uppercase 16-hex failed request token"}
         if type(resume_arbitrary_commands) is not bool:
             return {"ok": False, "message": "resume_arbitrary_commands must be boolean"}
-        if resume_arbitrary_commands and not s.allow_arbitrary_commands:
+        if resume_arbitrary_commands and not s.caps.arbitrary_commands:
             return {"ok": False, "message": "Arbitrary CMS commands are not enabled for this server"}
         if resume_arbitrary_commands and (token not in self.resolved_failed_capture_tokens
                                           or self.recovery_observation_count < 1):
@@ -234,7 +234,7 @@ class RunnerBridge:
         It sends no terminal input and never treats the failed output as complete.
         """
         s = self.session
-        if not s.allow_commands:
+        if not s.caps.commands:
             return {"ok": False, "message": "Command recovery requires --allow-commands"}
         if not isinstance(token, str) or not re.fullmatch(r"[0-9A-F]{16}", token):
             return {"ok": False, "message": "Supply the exact uppercase 16-hex failed request token"}
@@ -403,7 +403,7 @@ class RunnerBridge:
         s = self.session
         if type(timeout) is not int or not 1 <= timeout <= 240:
             return {"ok": False, "message": "Runner preparation timeout must be 1..240 seconds"}
-        if not s.allow_commands:
+        if not s.caps.commands:
             return {"ok": False, "message": "Read-only commands require --allow-commands"}
         if self.name is None and not create:
             return {"ok": False, "message": "No runner configured; explicit create=true is required to create a new EXEC"}
@@ -474,7 +474,7 @@ class RunnerBridge:
                 raise ValueError("Command timeout exceeds the configured standard/audit deadline")
         except ValueError as exc:
             return {"ok": False, "message": str(exc)}
-        if not s.allow_commands or not self.verified:
+        if not s.caps.commands or not self.verified:
             return {"ok": False, "message": "Enable read-only commands and verify a runner with cms_prepare_runner first"}
         token = secrets.token_hex(8).upper()
         capture = Capture(token)

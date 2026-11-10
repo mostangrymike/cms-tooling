@@ -30,7 +30,7 @@ class LinkQuery:
 
     def query(self, vaddr, timeout=30):
         s = self.session
-        if not s.allow_query_links:
+        if not s.caps.query_links:
             return {"ok": False, "message": "Link observation requires --allow-query-links",
                     "replacement_safe": False, "link_query_is_lock": False,
                     "host_operations_performed": False}
@@ -56,7 +56,7 @@ class LinkQuery:
             'volume': 'CP QUERY SYSTEM 0127',
             'disk': 'QUERY DISK',
         }
-        if (not self.session.allow_query_links or not isinstance(query, str) or query not in commands
+        if (not self.session.caps.query_links or not isinstance(query, str) or query not in commands
                 or type(timeout) is not int or not 1 <= timeout <= 60):
             return {'ok': False, 'message': 'Enable link observation and choose a fixed G-disk diagnostic',
                     'replacement_safe': False, 'host_operations_performed': False}

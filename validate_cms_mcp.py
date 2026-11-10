@@ -9,6 +9,7 @@ from datetime import timedelta
 from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
 from cms_mcp import device_selector
+from cms_policy import TOOL_CAPABILITIES
 
 EXPECTED = {"cms_connect", "cms_screen", "cms_status", "cms_send", "cms_disconnect", "cms_login", "cms_startup", "cms_continue_more", "cms_abort_read", "cms_prepare_runner", "cms_command", "cms_resolve_failed_capture", "cms_restart_runner", "cms_query_links", "cms_download", "cms_edit_prepare", "cms_edit_plan", "cms_operation_plan", "cms_upload_create_only", "cms_upload_file"}
 
@@ -22,6 +23,12 @@ def content(result):
 
 
 async def validate(live=False, device="0200@"):
+    declared = set(TOOL_CAPABILITIES)
+    if declared != EXPECTED:
+        raise RuntimeError(
+            "Reviewed tool inventory and cms_policy declarations disagree; "
+            f"only in cms_policy: {sorted(declared - EXPECTED)}; "
+            f"only in EXPECTED: {sorted(EXPECTED - declared)}")
     script = pathlib.Path(__file__).with_name("cms_mcp.py").resolve()
     params = StdioServerParameters(command=sys.executable, args=[str(script), "--device", device], cwd=str(script.parent))
     evidence = {"live": live, "interpreter": sys.executable}

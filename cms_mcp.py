@@ -4,6 +4,8 @@ from __future__ import annotations
 import argparse
 from collections import deque
 import atexit
+import functools
+import inspect
 import logging
 import queue
 import re
@@ -14,6 +16,7 @@ import time
 from typing import Literal
 
 from py3270 import Emulator, CommandError
+import cms_policy
 from cms_credentials import FileCredentialProvider
 from cms_capture import any_cms_command, mask_frames, readonly_command
 from cms_commands import ready_rc
@@ -216,14 +219,23 @@ class PipeApp:
 
 
 class Session:
-    def __init__(self, allow_input=False, factory=None, allow_login=False, credential_provider=None, allow_startup=False,
-                 allow_hx=False,
-                 allow_commands=False, runner_name=None, allow_downloads=False,
-                 download_root=None, download_runner_name=None, allow_local_edits=False,
-                 allow_create_only_upload=False, allow_query_links=False, allow_arbitrary_commands=False,
-                 allow_uploads=False, upload_root=None, default_device="0200@",
-                 transport="s3270"):
+    """One serialized terminal session and the capability set it was started with.
+
+    `capabilities` is the single source of truth.  The `allow_*` keywords and
+    properties are a compatibility shim for existing tests and operator
+    scripts; new code reads `self.caps`.
+    """
+
+    def __init__(self, capabilities=None, factory=None, credential_provider=None,
+                 runner_name=None, download_root=None, download_runner_name=None,
+                 upload_root=None, default_device="0200@", transport="s3270",
+                 **flags):
         self.lock = threading.RLock()
+        if capabilities is None:
+            capabilities = cms_policy.Capabilities.from_flags(flags)
+        elif flags:
+            raise TypeError("pass capabilities= or allow_* flags, not both")
+        self.caps = capabilities
         self.em = None
         self.default_device = device_selector(default_device)
         if transport not in {"s3270", "tnz"}:
@@ -231,18 +243,7 @@ class Session:
         self.transport = transport
         self.tnz_cp_read_ready = False
         self.tnz_vm_read_ready = False
-        self.allow_input = allow_input
-        self.allow_login = allow_login
-        self.allow_startup = allow_startup
-        self.allow_hx = allow_hx
-        self.allow_commands = allow_commands
-        self.allow_arbitrary_commands = allow_arbitrary_commands
-        self.allow_downloads = allow_downloads
-        self.allow_uploads = allow_uploads
         self.upload_root = upload_root
-        self.allow_local_edits = allow_local_edits
-        self.allow_create_only_upload = allow_create_only_upload
-        self.allow_query_links = allow_query_links
         self.completed_capture_token = None
         # Completed frames can remain visible across several short commands.
         # Only this live terminal's fully verified captures enter the history.
@@ -251,7 +252,7 @@ class Session:
         self._protocol_rows = []
         from cms_commands import RunnerBridge
         self.runner = RunnerBridge(self, runner_name,
-                                   policy=any_cms_command if allow_arbitrary_commands else readonly_command)
+                                   policy=any_cms_command if self.caps.arbitrary_commands else readonly_command)
         from cms_link_query import LinkQuery
         self.link_query = LinkQuery(self)
         from cms_download import SourceDownloader
@@ -274,6 +275,96 @@ class Session:
         self.file_uploader = FileUploader(self, upload_root)
         from cms_operations import OperationPlans
         self.operations = OperationPlans(self)
+
+    # Compatibility shim for callers that predate Capabilities. Each attribute
+    # is a view over one capability; the set itself stays the only authority.
+    @property
+    def allow_input(self):
+        return self.caps.input
+
+    @allow_input.setter
+    def allow_input(self, value):
+        self.caps = self.caps.with_flag("allow_input", value)
+
+    @property
+    def allow_login(self):
+        return self.caps.login
+
+    @allow_login.setter
+    def allow_login(self, value):
+        self.caps = self.caps.with_flag("allow_login", value)
+
+    @property
+    def allow_startup(self):
+        return self.caps.startup
+
+    @allow_startup.setter
+    def allow_startup(self, value):
+        self.caps = self.caps.with_flag("allow_startup", value)
+
+    @property
+    def allow_hx(self):
+        return self.caps.hx
+
+    @allow_hx.setter
+    def allow_hx(self, value):
+        self.caps = self.caps.with_flag("allow_hx", value)
+
+    @property
+    def allow_commands(self):
+        return self.caps.commands
+
+    @allow_commands.setter
+    def allow_commands(self, value):
+        self.caps = self.caps.with_flag("allow_commands", value)
+
+    @property
+    def allow_arbitrary_commands(self):
+        return self.caps.arbitrary_commands
+
+    @allow_arbitrary_commands.setter
+    def allow_arbitrary_commands(self, value):
+        self.caps = self.caps.with_flag("allow_arbitrary_commands", value)
+
+    @property
+    def allow_downloads(self):
+        return self.caps.downloads
+
+    @allow_downloads.setter
+    def allow_downloads(self, value):
+        self.caps = self.caps.with_flag("allow_downloads", value)
+
+    @property
+    def allow_uploads(self):
+        return self.caps.uploads
+
+    @allow_uploads.setter
+    def allow_uploads(self, value):
+        self.caps = self.caps.with_flag("allow_uploads", value)
+
+    @property
+    def allow_local_edits(self):
+        return self.caps.local_edits
+
+    @allow_local_edits.setter
+    def allow_local_edits(self, value):
+        self.caps = self.caps.with_flag("allow_local_edits", value)
+
+    @property
+    def allow_create_only_upload(self):
+        return self.caps.create_only_upload
+
+    @allow_create_only_upload.setter
+    def allow_create_only_upload(self, value):
+        self.caps = self.caps.with_flag("allow_create_only_upload", value)
+
+    @property
+    def allow_query_links(self):
+        return self.caps.query_links
+
+    @allow_query_links.setter
+    def allow_query_links(self, value):
+        self.caps = self.caps.with_flag("allow_query_links", value)
 
     def redact(self, text):
         for secret in sorted(self.secrets, key=len, reverse=True):
@@ -350,17 +441,17 @@ class Session:
                   "keyboard": parts[0], "formatted": parts[1] == "F",
                   "connected": parts[3].startswith("C("), "emulator_mode": parts[4],
                   "terminal_status": status, "fields": fields,
-                  "field_layout_error": layout_error, "input_enabled": self.allow_input,
-                  "login_enabled": self.allow_login,
-                  "startup_enabled": self.allow_startup,
-                  "hx_abort_enabled": self.allow_hx,
-                  "readonly_commands_enabled": self.allow_commands and not self.allow_arbitrary_commands,
-                  "arbitrary_commands_enabled": self.allow_commands and self.allow_arbitrary_commands,
-                  "downloads_enabled": self.allow_downloads,
-                  "uploads_enabled": self.allow_uploads,
-                  "local_edits_enabled": self.allow_local_edits,
-                  "create_only_upload_enabled": self.allow_create_only_upload,
-                  "query_links_enabled": self.allow_query_links,
+                  "field_layout_error": layout_error, "input_enabled": self.caps.input,
+                  "login_enabled": self.caps.login,
+                  "startup_enabled": self.caps.startup,
+                  "hx_abort_enabled": self.caps.hx,
+                  "readonly_commands_enabled": self.caps.commands and not self.caps.arbitrary_commands,
+                  "arbitrary_commands_enabled": self.caps.commands and self.caps.arbitrary_commands,
+                  "downloads_enabled": self.caps.downloads,
+                  "uploads_enabled": self.caps.uploads,
+                  "local_edits_enabled": self.caps.local_edits,
+                  "create_only_upload_enabled": self.caps.create_only_upload,
+                  "query_links_enabled": self.caps.query_links,
                   "capture_active": self.capture_token is not None,
                   **observed}
         # Internal startup verification only: report a boolean, never the
@@ -481,16 +572,16 @@ class Session:
         with self.lock:
             if self.em is None:
                 return {"ok": True, "connected": False, "state": "disconnected",
-                        "input_enabled": self.allow_input, "login_enabled": self.allow_login,
-                        "startup_enabled": self.allow_startup,
-                        "hx_abort_enabled": self.allow_hx,
-                        "readonly_commands_enabled": self.allow_commands and not self.allow_arbitrary_commands,
-                        "arbitrary_commands_enabled": self.allow_commands and self.allow_arbitrary_commands,
-                        "downloads_enabled": self.allow_downloads,
-                        "uploads_enabled": self.allow_uploads,
-                        "local_edits_enabled": self.allow_local_edits,
-                        "create_only_upload_enabled": self.allow_create_only_upload,
-                        "query_links_enabled": self.allow_query_links,
+                        "input_enabled": self.caps.input, "login_enabled": self.caps.login,
+                        "startup_enabled": self.caps.startup,
+                        "hx_abort_enabled": self.caps.hx,
+                        "readonly_commands_enabled": self.caps.commands and not self.caps.arbitrary_commands,
+                        "arbitrary_commands_enabled": self.caps.commands and self.caps.arbitrary_commands,
+                        "downloads_enabled": self.caps.downloads,
+                        "uploads_enabled": self.caps.uploads,
+                        "local_edits_enabled": self.caps.local_edits,
+                        "create_only_upload_enabled": self.caps.create_only_upload,
+                        "query_links_enabled": self.caps.query_links,
                         "cms_command_complete": None}
             return self.screen()
 
@@ -689,7 +780,7 @@ class Session:
 
     def login(self, timeout=30, reconnect_here=False):
         with self.lock:
-            if not self.allow_login or self.credential_provider is None:
+            if not self.caps.login or self.credential_provider is None:
                 return {"ok": False, "message": "Login requires --allow-login and a local credential provider"}
             if type(timeout) is not int or not 1 <= timeout <= 45:
                 return {"ok": False, "message": "Login timeout must be 1..45 seconds"}
@@ -828,7 +919,7 @@ class Session:
     def startup(self, timeout=30, verify_cms=False, begin_vm=False):
         """Continue a verified startup read with one blank Enter or explicit VM begin."""
         with self.lock:
-            if not self.allow_startup:
+            if not self.caps.startup:
                 return {"ok": False, "message": "Startup continuation requires --allow-startup"}
             if type(timeout) is not int or not 1 <= timeout <= 45:
                 return {"ok": False, "message": "Startup timeout must be 1..45 seconds"}
@@ -988,7 +1079,7 @@ class Session:
         # Validate before touching a session. No arbitrary action strings/macros.
         with self.lock:
             try:
-                if not self.allow_input:
+                if not self.caps.input:
                     raise ValueError("Observation-only server; input requires --allow-input and operator authorization")
                 if not 1 <= timeout <= 30:
                     raise ValueError("timeout must be 1..30 seconds")
@@ -1050,7 +1141,7 @@ class Session:
     def continue_more(self, timeout=10):
         """Advance one observed MORE/HOLDING page with PA2; require a readable next screen."""
         with self.lock:
-            if not self.allow_startup:
+            if not self.caps.startup:
                 return {"ok": False, "message": "MORE continuation requires --allow-startup"}
             if type(timeout) is not int or not 1 <= timeout <= 90:
                 return {"ok": False, "message": "MORE continuation timeout must be 1..90 seconds"}
@@ -1158,7 +1249,7 @@ class Session:
         input field, not a successful command return code.
         """
         with self.lock:
-            if not self.allow_hx:
+            if not self.caps.hx:
                 return {"ok": False, "message": "HX recovery requires --allow-hx"}
             if type(timeout) is not int or not 1 <= timeout <= 30:
                 return {"ok": False, "message": "HX recovery timeout must be 1..30 seconds"}
@@ -1228,7 +1319,32 @@ def create_server(session):
                     instructions="Explicit-connect z/VM terminal. Inspect screen/fields before input. "
                     "Never infer CMS completion from keyboard unlock. Input needs operator authorization.")
 
-    @server.tool()
+    registered = []
+
+    def tool():
+        """Register a tool declared in cms_policy, behind one capability gate.
+
+        The gate runs before the body so a disabled tool cannot reach its
+        service, and it returns that tool's documented refusal shape. The
+        original signature and docstring are preserved for the MCP schema.
+        """
+        def register(fn):
+            spec = cms_policy.declaration(fn.__name__)
+
+            @functools.wraps(fn)
+            def guarded(*args, **kwargs):
+                refused = cms_policy.refusal(spec, session.caps)
+                if refused is not None:
+                    return refused
+                return fn(*args, **kwargs)
+
+            guarded.__signature__ = inspect.signature(fn, eval_str=True)
+            server.add_tool(guarded, name=spec.name, description=fn.__doc__)
+            registered.append(spec)
+            return guarded
+        return register
+
+    @tool()
     def cms_connect(device: str | None = None, timeout: int = 10) -> dict:
         """Connect to fixed TN3270 127.0.0.1:3271. Device: auto, 0200@, or GROUP@.
 
@@ -1238,17 +1354,17 @@ def create_server(session):
         """
         return session.connect(device, timeout)
 
-    @server.tool()
+    @tool()
     def cms_screen(wait_output: bool = False, timeout: int = 5) -> dict:
         """Read a complete sanitized screen; optionally wait for host output without sending input."""
         return session.screen(wait_output, timeout)
 
-    @server.tool()
+    @tool()
     def cms_status() -> dict:
         """Observe logo/login/password/CP READ/VM READ/running/CMS Ready/MORE/HOLDING/XEDIT/unknown; no completion claim."""
         return session.status()
 
-    @server.tool()
+    @tool()
     def cms_send(action: Literal["String", "Enter", "Clear", "PF", "PA", "Home", "Tab", "BackTab", "EraseInput", "Reset", "MoveCursor"],
                  text: str | None = None, number: int | None = None,
                  row: int | None = None, column: int | None = None, sensitive: bool = False,
@@ -1261,7 +1377,7 @@ def create_server(session):
         """
         return session.send(action, text, number, row, column, sensitive, wait, timeout)
 
-    @server.tool()
+    @tool()
     def cms_login(timeout: int = 30, reconnect_here: bool = False) -> dict:
         """Perform one locally credentialed login through a verified guest form or CP MAINT menu.
 
@@ -1274,7 +1390,7 @@ def create_server(session):
         """
         return session.login(timeout, reconnect_here)
 
-    @server.tool()
+    @tool()
     def cms_startup(timeout: int = 30, verify_cms: bool = False,
                     begin_vm: bool = False) -> dict:
         """Continue verified startup with one Enter, CP BEGIN, or explicit VM b.
@@ -1291,7 +1407,7 @@ def create_server(session):
         """
         return session.startup(timeout, verify_cms, begin_vm)
 
-    @server.tool()
+    @tool()
     def cms_continue_more(timeout: int = 10) -> dict:
         """Advance exactly one fresh, verified MORE/HOLDING page with PA2.
 
@@ -1301,7 +1417,7 @@ def create_server(session):
         """
         return session.continue_more(timeout)
 
-    @server.tool()
+    @tool()
     def cms_abort_read(timeout: int = 15) -> dict:
         """Send exactly HX then Enter at a verified, empty reconnect VM READ field.
 
@@ -1312,7 +1428,7 @@ def create_server(session):
         """
         return session.abort_read(timeout)
 
-    @server.tool()
+    @tool()
     def cms_prepare_runner(create: bool = False) -> dict:
         """Verify a configured runner, or explicitly create one new randomly named EXEC on A.
 
@@ -1323,7 +1439,7 @@ def create_server(session):
         with session.lock:
             return session.runner.prepare(create)
 
-    @server.tool()
+    @tool()
     def cms_command(command: str, timeout: int = 120) -> dict:
         """Run a CMS command and capture complete records with its actual CMS-stage RC.
 
@@ -1337,7 +1453,7 @@ def create_server(session):
         with session.lock:
             return session.runner.run(command, timeout)
 
-    @server.tool()
+    @tool()
     def cms_resolve_failed_capture(token: str,
                                    resume_arbitrary_commands: bool = False) -> dict:
         """Resolve one exact visible F 0 ACK / Ready(12) capture failure.
@@ -1350,7 +1466,7 @@ def create_server(session):
         with session.lock:
             return session.runner.resolve_failed_capture(token, resume_arbitrary_commands)
 
-    @server.tool()
+    @tool()
     def cms_restart_runner(token: str) -> dict:
         """Reset command-runner recovery state after a stable failed ACK frame.
 
@@ -1364,13 +1480,13 @@ def create_server(session):
         with session.lock:
             return session.runner.restart_runner(token)
 
-    @server.tool()
+    @tool()
     def cms_query_links(vaddr: str, timeout: int = 120) -> dict:
         """Run CP QUERY LINKS for one virtual address; this observes links, not a lock."""
         with session.lock:
             return session.link_query.query(vaddr, timeout)
 
-    @server.tool()
+    @tool()
     def cms_download(filename: str, filetype: str, filemode: str,
                      create_runner: bool = False, timeout: int = 1800) -> dict:
         """Download one literal CMS file into a new snapshot under the configured local Git worktree.
@@ -1387,7 +1503,7 @@ def create_server(session):
         """
         return session.downloader.download(filename, filetype, filemode, create_runner, timeout)
 
-    @server.tool()
+    @tool()
     def cms_edit_prepare(snapshot: str) -> dict:
         """Create a LOCAL editable workspace from a downloaded snapshot identifier.
 
@@ -1398,7 +1514,7 @@ def create_server(session):
         """
         return session.edits.prepare(snapshot)
 
-    @server.tool()
+    @tool()
     def cms_edit_plan(edit_id: str) -> dict:
         """Validate a local edit and write a complete diff and review-only upload plan.
 
@@ -1410,7 +1526,7 @@ def create_server(session):
         """
         return session.edits.plan(edit_id)
 
-    @server.tool()
+    @tool()
     def cms_operation_plan(edit_id: str, plan_id: str, plan_sha256: str, recipe: dict) -> dict:
         """Create a LOCAL review-only replacement/build manifest; never execute it.
 
@@ -1424,7 +1540,7 @@ def create_server(session):
         """
         return session.operations.plan(edit_id, plan_id, plan_sha256, recipe)
 
-    @server.tool()
+    @tool()
     def cms_upload_create_only(edit_id: str, plan_id: str, plan_sha256: str,
                                target: str, candidate_sha256: str, timeout: int = 120) -> dict:
         """Create one explicitly named disposable ZVxxxxxx EXEC A1 and verify exact readback.
@@ -1438,7 +1554,7 @@ def create_server(session):
         """
         return session.uploader.upload(edit_id, plan_id, plan_sha256, target, candidate_sha256, timeout)
 
-    @server.tool()
+    @tool()
     def cms_upload_file(source_path: str, filename: str, filetype: str, filemode: str,
                         mode: Literal["ascii", "binary"] = "ascii",
                         recfm: Literal["fixed", "variable", "undefined"] = "fixed",
@@ -1459,10 +1575,18 @@ def create_server(session):
                 mode=mode, recfm=recfm, lrecl=lrecl,
                 overwrite_existing=overwrite_existing, timeout=timeout)
 
-    @server.tool()
+    @tool()
     def cms_disconnect() -> dict:
         """Terminate only this server's dedicated s3270 process; sends no LOGOFF or CMS command."""
         return session.disconnect()
+
+    registered_names = {spec.name for spec in registered}
+    if registered_names != set(cms_policy.TOOL_CAPABILITIES):
+        missing = sorted(set(cms_policy.TOOL_CAPABILITIES) - registered_names)
+        extra = sorted(registered_names - set(cms_policy.TOOL_CAPABILITIES))
+        raise RuntimeError(
+            f"tool registration and cms_policy disagree; undeclared: {extra}; "
+            f"declared but not registered: {missing}")
 
     return server
 
@@ -1502,17 +1626,14 @@ def main():
         parser.error("--allow-arbitrary-commands requires --allow-commands")
     if args.allow_uploads and not args.upload_root:
         parser.error("--allow-uploads requires --upload-root")
-    session = Session(allow_input=args.allow_input, allow_login=args.allow_login,
+    session = Session(capabilities=cms_policy.Capabilities.from_namespace(args),
                       credential_provider=FileCredentialProvider(args.credential_file) if args.credential_file else None,
-                      allow_startup=args.allow_startup, allow_hx=args.allow_hx,
-                      allow_commands=args.allow_commands, runner_name=args.runner_name,
-                      allow_arbitrary_commands=args.allow_arbitrary_commands,
-                      allow_downloads=args.allow_downloads, download_root=args.download_root,
-                      allow_uploads=args.allow_uploads, upload_root=args.upload_root,
-                      download_runner_name=args.download_runner_name, allow_local_edits=args.allow_local_edits,
-                      allow_create_only_upload=args.allow_create_only_upload,
-                       allow_query_links=args.allow_query_links, default_device=args.device,
-                       transport=args.transport)
+                      runner_name=args.runner_name,
+                      download_root=args.download_root,
+                      upload_root=args.upload_root,
+                      download_runner_name=args.download_runner_name,
+                      default_device=args.device,
+                      transport=args.transport)
     atexit.register(session.disconnect)
     create_server(session).run(transport="stdio")
 

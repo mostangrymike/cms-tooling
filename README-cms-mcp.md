@@ -252,7 +252,7 @@ The build's temporary review paths are diagnostic only and are discarded after
 verification; the earlier live workflow review artifacts remain in `cms-sources`.
 
 ```sh
-.venv/bin/python -B -m unittest -v test_cms_mcp test_cms_login test_cms_startup test_cms_capture test_cms_commands test_cms_download test_cms_edit test_cms_upload test_cms_link_query test_cms_operations
+.venv/bin/python -B -m unittest -v test_cms_policy test_cms_mcp test_cms_login test_cms_startup test_cms_capture test_cms_commands test_cms_download test_cms_edit test_cms_upload test_cms_link_query test_cms_operations
 .venv/bin/python -B validate_cms_mcp.py
 .venv/bin/python -B verify_codex_cms.py
 ```
@@ -263,6 +263,13 @@ checks all 20 tools and verifies that input/login/startup/commands/link
 queries/downloads, local edits and create-only upload remain disabled by default. Codex
 discovery validation uses `codex app-server` catalog discovery without a model
 turn or any terminal connection. It may require local sandbox approval.
+
+Capabilities come from one frozen `cms_policy.Capabilities` set built by
+`main()`; the `allow_*` attributes on `Session` are a compatibility view over
+it. `cms_policy.TOOL_DECLARATIONS` is the reviewed tool table: it names the
+capability each tool requires and the structured refusal a disabled tool
+returns. Registration refuses an undeclared tool, and `validate_cms_mcp.py`
+fails if that table and its independent `EXPECTED` inventory disagree.
 
 For an authorized download/edit review using the existing helpers:
 

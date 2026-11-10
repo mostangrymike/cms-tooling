@@ -24,9 +24,9 @@ class CreateOnlyUploader:
 
     def upload(self, edit_id, plan_id, plan_sha256, target, candidate_sha256, timeout=120):
         s = self.session
-        if not s.allow_create_only_upload:
+        if not s.caps.create_only_upload:
             return {"ok": False, "message": "Create-only upload requires --allow-create-only-upload"}
-        if not s.allow_commands or not s.runner.verified:
+        if not s.caps.commands or not s.runner.verified:
             return {"ok": False, "message": "Verify the configured read-only runner before upload"}
         if not isinstance(edit_id, str) or not re.fullmatch(r"edit-[0-9a-f]{24}", edit_id):
             return {"ok": False, "message": "Invalid generated edit identifier"}
@@ -157,9 +157,9 @@ class FileUploader:
     def upload(self, source_path, filename, filetype, filemode, *, mode="ascii",
                recfm="fixed", lrecl=80, overwrite_existing=False, timeout=120):
         s = self.session
-        if not s.allow_uploads:
+        if not s.caps.uploads:
             return {"ok": False, "message": "File uploads require --allow-uploads"}
-        if not s.allow_commands or not s.runner.verified:
+        if not s.caps.commands or not s.runner.verified:
             return {"ok": False, "message": "Verify the configured command runner before upload"}
         if type(overwrite_existing) is not bool:
             return {"ok": False, "message": "overwrite_existing must be boolean"}

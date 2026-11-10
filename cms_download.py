@@ -162,7 +162,7 @@ class SourceDownloader:
         with s.lock:
             evidence = []
             try:
-                if not s.allow_downloads or not s.allow_commands or not self.root:
+                if not s.caps.downloads or not s.caps.commands or not self.root:
                     raise ValueError('Source downloads require --allow-downloads, --allow-commands and --download-root')
                 requested = file_id(filename, filetype, filemode)
                 if (type(self.max_timeout) is not int or self.max_timeout != 1800
