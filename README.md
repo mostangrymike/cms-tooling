@@ -60,3 +60,22 @@ Neither provisioning nor an audit authorizes fixture source changes or builds.
 The qualified helper is retained as `ZME09C7C EXEC A`; future explicit re-audits
 must use `--output-reader ZME09C7C` and reverify its source.
 No recovery or audit success is claimed merely because the implementation exists.
+
+## License
+
+Copyright (C) 2026 Mike Wommack
+
+This project is free software: you can redistribute it and/or modify it under
+the terms of the GNU General Public License as published by the Free Software
+Foundation, either version 3 of the License, or (at your option) any later
+version.
+
+This project is distributed in the hope that it will be useful, but WITHOUT
+ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+FOR A PARTICULAR PURPOSE. See the GNU General Public License for more details.
+
+You should have received a copy of the GNU General Public License along with
+this project in [LICENSE](LICENSE). If not, see
+<https://www.gnu.org/licenses/>.
+
+SPDX-License-Identifier: GPL-3.0-or-later
