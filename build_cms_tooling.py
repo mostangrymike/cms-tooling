@@ -23,6 +23,7 @@ SOURCE_FILES = (
     "V1-PROGRESS.md", "CMS-C-RECIPE.md",
     "requirements-cms-mcp.txt", "ZMCPRUN.EXEC", "ZMCPGET.EXEC", "ZMCPQUAL.EXEC",
     "cms_mcp.py", "cms_capture.py", "cms_commands.py", "cms_credentials.py", "cms_fixture_output.py", "ZMCPOUT.EXEC",
+    "tnz_transport.py",
     "cms_download.py", "cms_edit.py", "cms_upload.py", "cms_link_query.py", "cms_operations.py", "cms_rehearsal.py", "cms_native_review.py",
     "diagnose_cms.py", "verify_codex_cms.py", "build_cms_tooling.py", "validate_cms_compiler.py", "validate_cms_fixture.py", "validate_cms_fixture_audit.py",
     "fixtures/README.md", "fixtures/terminal-screens.json",
