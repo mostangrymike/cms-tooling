@@ -20,3 +20,9 @@
 ## Pull requests
 - Explain the problem, the fix, and any operational impact (ports, bind addresses, protocols, timeouts).
 - Note security/privacy implications when touching transport, auth, or logging.
+
+## License
+
+By submitting a contribution you agree that it is licensed under the same
+terms as this project: the GNU General Public License, version 3 or (at your
+option) any later version (`GPL-3.0-or-later`). See [LICENSE](LICENSE).
