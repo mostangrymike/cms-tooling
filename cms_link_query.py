@@ -67,7 +67,7 @@ class LinkQuery:
 
         def work():
             from cms_commands import RunnerBridge, ready_rc
-            from cms_mcp import host_display
+            from cms_screen import host_display
 
             if s.em is None:
                 raise RuntimeError("Connect and inspect/login before querying links")

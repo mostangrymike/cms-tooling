@@ -95,7 +95,8 @@ def probe(session, startup_result, display_signature):
 
 
 def main():
-    from cms_mcp import Session, host_display
+    from cms_mcp import Session
+    from cms_screen import host_display
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--live-query", required=True, action="store_true")
     parser.add_argument("--credential-file", required=True)

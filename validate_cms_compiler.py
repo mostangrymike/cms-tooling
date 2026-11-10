@@ -29,7 +29,7 @@ def release_startup_hold(session, startup, timeout=20, authorized=False):
     Clear, Enter, BEGIN, transfer, restore or other recovery action follows.
     """
     from cms_commands import RunnerBridge
-    from cms_mcp import host_display
+    from cms_screen import host_display
     if (authorized is not True or startup.get('outcome') != 'startup_page_hold_observed'
             or startup.get('actions') != ['BEGIN', 'Enter']
             or type(timeout) is not int or not 1 <= timeout <= 30):

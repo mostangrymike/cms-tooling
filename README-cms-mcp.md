@@ -259,7 +259,7 @@ only and are discarded after verification; the earlier live workflow review
 artifacts remain in `cms-sources`.
 
 ```sh
-.venv/bin/python -B -m unittest -v test_cms_build test_cms_policy test_cms_mcp test_cms_login test_cms_startup test_cms_capture test_cms_commands test_cms_download test_cms_edit test_cms_upload test_cms_link_query test_cms_operations
+.venv/bin/python -B -m unittest -v test_cms_build test_cms_policy test_cms_screen test_cms_mcp test_cms_login test_cms_startup test_cms_capture test_cms_commands test_cms_download test_cms_edit test_cms_upload test_cms_link_query test_cms_operations
 .venv/bin/python -B validate_cms_mcp.py
 .venv/bin/python -B verify_codex_cms.py
 ```
@@ -277,6 +277,13 @@ it. `cms_policy.TOOL_DECLARATIONS` is the reviewed tool table: it names the
 capability each tool requires and the structured refusal a disabled tool
 returns. Registration refuses an undeclared tool, and `validate_cms_mcp.py`
 fails if that table and its independent `EXPECTED` inventory disagree.
+
+`cms_screen.py` is the pure screen layer: it classifies rows, parses field
+geometry, sanitizes observations, and owns the exact boundary predicates the
+session acts on. It imports no terminal, session, or network state, and
+`test_cms_screen.py` asserts it does not import `cms_mcp`. `cms_mcp` re-exports
+the same names for existing callers, so the server module and the other
+packaged tools share one definition of each boundary.
 
 For an authorized download/edit review using the existing helpers:
 

@@ -45,7 +45,7 @@ class RunnerBridge:
 
     def _await_input_field(self, screen, allow_vm_read=False, expected_ack=None, timeout=5):
         """Wait briefly for a locked REXX PULL field to unlock without losing its ACK boundary."""
-        from cms_mcp import host_display
+        from cms_screen import host_display
 
         allowed_states = {"cms_ready", "vm_running"}
         if allow_vm_read:
@@ -86,7 +86,7 @@ class RunnerBridge:
         s.command("MoveCursor(22,0)")
         check = self._await_input_field(s.snapshot(), allow_vm_read=allow_vm_read,
                                         expected_ack=expected_ack)
-        from cms_mcp import host_display
+        from cms_screen import host_display
         if (check["cursor"] != {"row": 23, "column": 1, "protected": False}
                 or check["state"] != before["state"]
                 or host_display(check) != host_display(before)):
@@ -298,7 +298,7 @@ class RunnerBridge:
         Used by helper STATE preconditions and the fixed compiler diagnostic.
         This is not a public or general command dispatch interface.
         """
-        from cms_mcp import host_display
+        from cms_screen import host_display
         readonly_command(command)
         before = self._ready_boundary()
         # A repeated visible echo cannot be distinguished from this dispatch
@@ -365,7 +365,7 @@ class RunnerBridge:
         # the next page; Enter would only hold the current page. PA2 preserves
         # the input area while clearing output. Advance only a newly observed,
         # formatted MORE/HOLDING page, and wait through any transient buffer.
-        from cms_mcp import host_display
+        from cms_screen import host_display
         deadline = time.monotonic() + 90
         fresh = False
         advanced_pages = set()

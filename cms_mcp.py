@@ -20,11 +20,16 @@ import cms_policy
 from cms_credentials import FileCredentialProvider
 from cms_capture import any_cms_command, mask_frames, readonly_command
 from cms_commands import ready_rc
+from cms_screen import (ROWS, COLS, blank_vm_read_input, classify,
+                        cp_logon_boundary, cp_password_prompt,
+                        cp_pending_password_boundary, expected_input_matches,
+                        field_layout, host_display, hx_read_boundary, login_layout,
+                        password_is_vm_read_startup, runner_protocol_visible,
+                        sanitize_rows, tnz_login_layout)
 from tnz_transport import TnzEmulator
 
 logging.getLogger("py3270").disabled = True
 
-ROWS, COLS = 24, 80
 HOST_ENDPOINT = "127.0.0.1:3271"
 
 
@@ -35,107 +40,6 @@ def device_selector(value):
     if isinstance(value, str) and re.fullmatch(r"(?:[0-9A-Fa-f]{4}|[A-Za-z][A-Za-z0-9]{0,7})@", value):
         return value.upper()
     raise ValueError("device must be auto, a four-hex-digit address with @, or a 1..8 alphanumeric group name with @")
-
-
-def classify(rows: list[str]) -> dict:
-    """Heuristics report observations, never command completion."""
-    text = "\n".join(rows).upper()
-    patterns = [
-        ("login", r"USERID\s*===>[\s\S]*PASSWORD\s*===>"),
-        ("password", r"(?:ENTER|TYPE|YOUR|LOGON).*PASSWORD|PASSWORD\s*[:=]|^\s*PASSWORD\s*$"),
-        ("xedit", r"\bXEDIT\b|\*\*\* TOP OF FILE \*\*\*|\*\*\* END OF FILE \*\*\*"),
-        # The host may append its z/VM system name after MORE; that suffix is
-        # informational and can vary. Classify the MORE marker itself only.
-        ("holding", r"\bHOLDING\b"), ("more", r"\bMORE\.\.\.|\bMORE\s*$"),
-        ("cp_read", r"\bCP READ\b"),
-        ("cms_ready", r"^\s*READY(?:\(-?[0-9]+\))?;"),
-        ("vm_read", r"\bVM READ\b"),
-        # Retain a preliminary RUNNING classification until snapshot() can
-        # combine it with guest-banner and input-field evidence.
-        ("vm_running", r"\bRUNNING\s+[A-Z0-9*#@._-]+\s*$"),
-        ("login", r"LOGON USERID|HCPLON\d+[A-Z]|ENTER.*LOGON"),
-        ("logo", r"Z/VM ONLINE|HERCULES VERSION(?:\s*:|\s+\d)"),
-    ]
-    matches = [name for name, pattern in patterns if re.search(pattern, text, re.M)]
-    if "HERCULES VERSION" in text:
-        screen_kind = "hercules_banner"
-    elif (re.search(r"Z/VM VERSION 6 RELEASE 3\.0", text)
-          and re.search(r"\b(?:LOGON AT|RECONNECTED AT)\b", text)):
-        screen_kind = "zvm_guest_banner"
-    else:
-        screen_kind = "guest_or_unknown"
-    return {"state": matches[0] if matches else "unknown", "indicators": matches,
-            "screen_kind": screen_kind,
-            "cms_command_complete": None, "classification": "heuristic"}
-
-
-def field_layout(lines: list[str]) -> list[dict]:
-    """Parse SF attributes without ever returning field contents or raw hex."""
-    starts = []
-    pos = 0
-    for token in " ".join(lines).split():
-        if token.startswith("SA("):
-            continue
-        if token.startswith("SF("):
-            m = re.search(r"c0=([0-9a-fA-F]{2})", token)
-            if not m:
-                raise ValueError("Field attribute missing c0")
-            attr = int(m[1], 16)
-            starts.append((pos, attr))
-        elif not re.fullmatch(r"[0-9a-fA-F]{2,8}|-|GE\([0-9a-fA-F]{2}\)", token):
-            raise ValueError("Unrecognized buffer token; contents withheld")
-        pos += 1
-    if pos != ROWS * COLS:
-        raise ValueError(f"Expected 1920 screen positions, got {pos}")
-    fields = []
-    for i, (start, attr) in enumerate(starts):
-        end = starts[(i + 1) % len(starts)][0]
-        fields.append({"attribute_offset": start, "start_offset": (start + 1) % pos,
-                       "length": (end - start - 1) % pos,
-                       "row": (start + 1) % pos // COLS + 1,
-                       "column": (start + 1) % COLS + 1,
-                       "protected": bool(attr & 0x20), "numeric": bool(attr & 0x10),
-                       "nondisplay": attr & 0x0C == 0x0C, "modified": bool(attr & 1)})
-    return fields
-
-
-def sanitize_rows(rows: list[str], fields: list[dict], secrets: set[str],
-                  password: bool = False, layout_ok: bool = True) -> list[str]:
-    flat = list("".join(rows))
-    if not layout_ok or (secrets and not fields):
-        return ["*" * COLS for _ in range(ROWS)]
-    for field in fields:
-        if field["nondisplay"] or ((password or secrets) and not field["protected"]):
-            for n in range(field["length"]):
-                flat[(field["start_offset"] + n) % len(flat)] = "*"
-    text = "".join(flat)
-    # Every input string is treated as potentially secret, including across rows.
-    for secret in sorted(secrets, key=len, reverse=True):
-        if secret:
-            text = re.sub(re.escape(secret), lambda m: "*" * len(m[0]), text, flags=re.I)
-    # Protect credentials already present when attaching to a screen.
-    rows = [text[i:i + COLS] for i in range(0, ROWS * COLS, COLS)]
-    # Match inline passwords within one physical row, never the next row's
-    # version banner or the ordinary 'LOGON AT <time>' diagnostic.
-    safe_rows = []
-    for row in rows:
-        row = re.sub(r"(?i)(\bLOGON[ \t]+(?!AT(?:[ \t]|$))\S+[ \t]+)(\S+)",
-                     lambda m: m[1] + "*" * len(m[2]), row)
-        # CP READ may display an account/session identifier after the state.
-        row = re.sub(r"(?i)(\b(?:CP READ|VM READ|RUNNING)[ \t]+)([A-Z0-9$#@._-]+)",
-                     lambda m: m[1] + "*" * len(m[2]), row)
-        safe_rows.append(row)
-    return safe_rows
-
-
-def host_display(screen):
-    """Compare host-controlled display only, excluding local input and keyboard."""
-    flat = list("".join(screen["rows"]))
-    for field in screen["fields"]:
-        if not field["protected"]:
-            for n in range(field["length"]):
-                flat[(field["start_offset"] + n) % 1920] = " "
-    return "".join(flat)
 
 
 class PipeApp:
@@ -416,18 +320,9 @@ class Session:
                                      for n in range(field["length"]))
         # After a CP LOGON password is accepted, Hercules can retain the
         # password instruction in the banner while the guest has already
-        # reached its VM READ startup prompt. Refine only this exact empty,
-        # visible, row-23 startup field shape with a fresh LOGON/RECONNECTED
-        # marker; all other password screens remain password screens.
-        editable = [field for field in fields if not field["protected"]]
-        vm_read_startup = (observed["state"] == "password"
-            and observed["screen_kind"] == "hercules_banner"
-            and "VM READ" in rows[23].upper() and "CP READ" not in rows[23].upper()
-            and re.search(r"\b(?:LOGON AT|RECONNECTED AT)\b", "\n".join(rows), re.I)
-            and parts[0] == "U" and layout_error is None and len(editable) == 1
-            and (editable[0]["row"], editable[0]["column"], editable[0]["length"],
-                 editable[0]["nondisplay"], editable[0]["empty"]) == (23, 1, 139, False, True))
-        if vm_read_startup:
+        # reached its VM READ startup prompt.  cms_screen refines only this
+        # exact empty, visible, row-23 startup shape.
+        if password_is_vm_read_startup(observed, rows, fields, parts, layout_error):
             observed["state"] = "vm_read"
             observed["indicators"] = [item for item in observed["indicators"] if item != "password"]
         # RUNNING plus an empty field on a z/VM reconnect banner is not a CMS
@@ -457,12 +352,8 @@ class Session:
         # Internal startup verification only: report a boolean, never the
         # unprotected field value. Public screen rows remain redacted.
         if _expected_input is not None:
-            editable = [field for field in fields if not field["protected"]]
-            matches = (len(editable) == 1 and len(_expected_input) <= editable[0]["length"]
-                and "".join(raw_flat[(editable[0]["start_offset"] + n) % 1920]
-                            for n in range(editable[0]["length"])
-                    ) == _expected_input + " " * (editable[0]["length"] - len(_expected_input)))
-            result["_expected_input_matches"] = bool(matches)
+            result["_expected_input_matches"] = expected_input_matches(
+                fields, rows, _expected_input)
         self.last_screen = result
         return result
 
@@ -585,104 +476,11 @@ class Session:
                         "cms_command_complete": None}
             return self.screen()
 
-    @staticmethod
-    def _login_layout(screen):
-        expected = [(20, 17, 8, False), (21, 17, 8, True), (23, 17, 123, False)]
-        fields = [f for f in screen["fields"] if not f["protected"]]
-        actual = [(f["row"], f["column"], f["length"], f["nondisplay"]) for f in fields]
-        rows = screen["rows"]
-        if (screen["state"] != "login" or screen["field_layout_error"] is not None
-                or not screen["connected"] or screen["emulator_mode"] != "I"
-                or actual != expected or any(f["modified"] for f in fields)
-                or "USERID" not in rows[19][:16] or "PASSWORD" not in rows[20][:16]
-                or "COMMAND" not in rows[22][:16]):
-            raise RuntimeError("Login form or field attributes differ from verified layout; no credentials submitted")
-        return fields
-
-    @staticmethod
-    def _tnz_login_layout(screen):
-        """TNZ may receive field attributes before protected label text."""
-        fields = [f for f in screen["fields"] if not f["protected"]]
-        actual = [(f["row"], f["column"], f["length"], f["nondisplay"]) for f in fields]
-        expected = [(20, 17, 8, False), (21, 17, 8, True), (23, 17, 123, False)]
-        if (screen["field_layout_error"] is not None or screen["keyboard"] != "U"
-                or actual != expected or any(not f["empty"] for f in fields)):
-            raise RuntimeError("TNZ login field geometry differs from verified layout")
-        screen["state"] = "login"
-        screen["indicators"] = ["login"]
-        return fields
-
-    @staticmethod
-    def _blank_vm_read_input(screen):
-        rows = screen.get("rows", [])
-        fields = [f for f in screen.get("fields", []) if not f["protected"]]
-        labelled_vm_read = "VM READ" in rows[-1].upper() and "CP READ" not in rows[-1].upper()
-        geometry = (len(rows) == 24 and len(fields) == 1
-            and (fields[0]["row"], fields[0]["column"], fields[0]["length"],
-                 fields[0]["nondisplay"], fields[0]["empty"])
-                == (23, 1, 139, False, True))
-        tnz_pending_vm_read = (screen.get("state") == "vm_running"
-            and screen.get("screen_kind") == "zvm_guest_banner")
-        return (screen.get("state") == "vm_read" or tnz_pending_vm_read
-                and screen.get("connected") and screen.get("keyboard") == "U"
-                and screen.get("field_layout_error") is None and geometry
-                and (labelled_vm_read or tnz_pending_vm_read))
-
-    @staticmethod
-    def _runner_protocol_visible(screen):
-        """A startup continuation must not consume a visible capture exchange."""
-        return any(re.match(r"^\s*(?:ZM1|ZA1)\s+[0-9A-F]{16}\b", row)
-                   for row in screen.get("rows", []))
-
-    @staticmethod
-    def _cp_input_field(screen, nondisplay=False, require_cursor=True):
-        fields = [f for f in screen.get("fields", []) if not f["protected"]]
-        return (screen.get("connected") and screen.get("keyboard") == "U"
-                and screen.get("field_layout_error") is None
-                and (not require_cursor or screen.get("cursor") == {
-                    "row": 23, "column": 1, "protected": False})
-                and len(fields) == 1 and fields[0]["row"] == 23
-                and fields[0]["column"] == 1 and fields[0]["length"] == 139
-                and fields[0]["nondisplay"] is nondisplay and fields[0]["empty"])
-
-    @classmethod
-    def _cp_logon_boundary(cls, screen, require_cursor=False):
-        rows = screen.get("rows", [])
-        text = "\n".join(rows).upper()
-        menu = (rows[1].strip() == "Enter one of the following commands:"
-                and re.match(r"\s*LOGON userid\b.*\bLOGON VMUSER1\)", rows[3], re.I)
-                and rows[5].strip() == "LOGOFF")
-        hercules_cp = (screen.get("screen_kind") == "hercules_banner"
-                       and "DEVICE NUMBER" in text and "SUBCHANNEL" in text)
-        return (screen.get("state") == "cp_read" and len(rows) == 24
-                and cls._cp_input_field(screen, nondisplay=False,
-                                        require_cursor=require_cursor)
-                and "CP READ" in rows[23].upper() and (menu or hercules_cp)
-                and not re.search(r"\b(?:RECONNECTED AT|LOGON AT)\b", text, re.I))
-
-    @classmethod
-    def _cp_password_prompt(cls, screen):
-        rows = screen.get("rows", [])
-        return (screen.get("state") == "password" and len(rows) == 24
-                and cls._cp_input_field(screen, nondisplay=True)
-                and re.search(r"\bPASSWORD\b", "\n".join(rows), re.I)
-                and "CP READ" in rows[23].upper())
-
-    @classmethod
-    def _cp_pending_password_boundary(cls, screen, require_cursor=False):
-        """Recognize an empty CP password field after an explicit HERE reconnect."""
-        rows = screen.get("rows", [])
-        return (screen.get("state") == "cp_read" and len(rows) == 24
-                and screen.get("screen_kind") in {"hercules_banner", "guest_or_unknown"}
-                and cls._cp_input_field(screen, nondisplay=True,
-                                        require_cursor=require_cursor)
-                and "CP READ" in rows[23].upper())
-
     def _cp_logon_maint(self, before, deadline, reconnect_here=False):
         """One locally credentialed LOGON MAINT from the exact CP menu, no retries."""
         snapshots = [before]
-        pending_password = reconnect_here and self._cp_pending_password_boundary(before)
-        if not pending_password and not self._cp_logon_boundary(before):
+        pending_password = reconnect_here and cp_pending_password_boundary(before)
+        if not pending_password and not cp_logon_boundary(before):
             return {"ok": False, "outcome": "cp_logon_boundary_not_verified",
                     "submitted": False, "snapshots": snapshots,
                     "screen": before, "retry_performed": False,
@@ -698,9 +496,9 @@ class Session:
         self.command("MoveCursor(22,0)")
         check = self.snapshot()
         snapshots.append(check)
-        checked_boundary = (self._cp_pending_password_boundary(check, require_cursor=True)
+        checked_boundary = (cp_pending_password_boundary(check, require_cursor=True)
                             if pending_password else
-                            self._cp_logon_boundary(check, require_cursor=True))
+                            cp_logon_boundary(check, require_cursor=True))
         if (not checked_boundary
                 or host_display(check) != host_display(before)):
             return {"ok": False, "outcome": "cp_logon_boundary_changed",
@@ -735,7 +533,7 @@ class Session:
                         "password_submitted": password_submitted, "screen": after,
                         "snapshots": snapshots, "retry_performed": False,
                         "cms_command_complete": None}
-            if fresh and self._cp_password_prompt(after):
+            if fresh and cp_password_prompt(after):
                 if password_submitted:
                     return {"ok": False, "outcome": "cp_password_reprompted",
                             "submitted": submitted, "password_submitted": True,
@@ -744,7 +542,7 @@ class Session:
                 self.command("MoveCursor(22,0)")
                 password_check = self.snapshot()
                 snapshots.append(password_check)
-                if (not self._cp_password_prompt(password_check)
+                if (not cp_password_prompt(password_check)
                         or host_display(password_check) != host_display(after)):
                     return {"ok": False, "outcome": "cp_password_boundary_changed",
                             "submitted": submitted, "password_submitted": False,
@@ -812,7 +610,7 @@ class Session:
                             break
                         if self.transport == "tnz":
                             try:
-                                self._tnz_login_layout(before)
+                                tnz_login_layout(before)
                                 break
                             except RuntimeError:
                                 pass
@@ -830,7 +628,7 @@ class Session:
                         return {"outcome": "existing_session_observed", "submitted": False,
                                 "screen": before, "cms_command_complete": None}
                     return self._cp_logon_maint(before, deadline, reconnect_here)
-                self._tnz_login_layout(before) if self.transport == "tnz" else self._login_layout(before)
+                tnz_login_layout(before) if self.transport == "tnz" else login_layout(before)
                 # Reject existing form input using the field state captured
                 # before screen sanitization. A prior login can leave secrets
                 # in this session's redactor, which masks every editable field
@@ -939,7 +737,7 @@ class Session:
                     current["state"] = "cp_read"
                 snapshots = [current]
                 actions = []
-                if self._runner_protocol_visible(current):
+                if runner_protocol_visible(current):
                     return {"ok": False, "outcome": "startup_runner_protocol_visible",
                             "screen": current, "snapshots": snapshots, "actions": actions,
                             "cms_command_complete": None}
@@ -967,7 +765,7 @@ class Session:
                     rows = "\n".join(current["rows"]).upper()
                     fields = [f for f in current["fields"] if not f["protected"]]
                     logon_marker = re.search(r"\bLOGON AT\b|\bRECONNECTED AT\b", rows)
-                    blank_vm_read = self._blank_vm_read_input(current)
+                    blank_vm_read = blank_vm_read_input(current)
                     tnz_cp_read = (self.transport == "tnz" and state == "cp_read")
                     if (state not in {"vm_read", "cp_read"}
                             or not current["connected"] or current["field_layout_error"] is not None
@@ -982,7 +780,7 @@ class Session:
                     self.command("MoveCursor(22,0)")
                     check = self.snapshot()
                     snapshots.append(check)
-                    if self._runner_protocol_visible(check):
+                    if runner_protocol_visible(check):
                         return {"ok": False, "outcome": "startup_runner_protocol_visible",
                                 "screen": check, "snapshots": snapshots, "actions": actions,
                                 "cms_command_complete": None}
@@ -1004,7 +802,7 @@ class Session:
                     if self.transport != "tnz" and (
                             check["state"] != state or check["cursor"] != {"row": 23, "column": 1, "protected": False}
                             or target != fields
-                            or blank_vm_read and (not self._blank_vm_read_input(check)
+                            or blank_vm_read and (not blank_vm_read_input(check)
                                                   or host_display(check) != host_display(current))
                             or begin_vm and host_display(check) != host_display(current)):
                         raise RuntimeError("Startup field changed before input; continuation aborted")
@@ -1019,7 +817,7 @@ class Session:
                             typed = self.snapshot(_expected_input="b")
                             input_matches = typed.pop("_expected_input_matches", False)
                             snapshots.append(typed)
-                            if self._runner_protocol_visible(typed):
+                            if runner_protocol_visible(typed):
                                 return {"ok": False, "outcome": "startup_runner_protocol_visible",
                                         "screen": typed, "snapshots": snapshots, "actions": actions,
                                         "cms_command_complete": None}
@@ -1223,24 +1021,6 @@ class Session:
             self.runner.verified = False
             return {"ok": True, "connected": False, "terminated": existed}
 
-    @staticmethod
-    def _hx_read_boundary(screen, staged_hx=False):
-        rows = screen.get("rows", [])
-        fields = [field for field in screen.get("fields", []) if not field["protected"]]
-        return (screen.get("connected") and screen.get("keyboard") == "U"
-                and screen.get("state") == "vm_read"
-                and screen.get("screen_kind") == "zvm_guest_banner"
-                and screen.get("field_layout_error") is None
-                and len(rows) == ROWS and "VM READ" in rows[-1].upper()
-                and "CP READ" not in rows[-1].upper()
-                and re.search(r"\bRECONNECTED AT\b", "\n".join(rows), re.I)
-                and len(fields) == 1
-                and (fields[0]["row"], fields[0]["column"], fields[0]["length"],
-                     fields[0]["nondisplay"], fields[0]["empty"])
-                    == (23, 1, 139, False, not staged_hx)
-                and screen.get("cursor") == {"row": 23, "column": 3 if staged_hx else 1,
-                                               "protected": False})
-
     def abort_read(self, timeout=15):
         """Send only HX+Enter at the exact reconnect VM READ boundary.
 
@@ -1258,24 +1038,24 @@ class Session:
 
             def work():
                 before = self.snapshot()
-                staged_hx = (self._hx_read_boundary(before, staged_hx=True)
+                staged_hx = (hx_read_boundary(before, staged_hx=True)
                              and before.get("_expected_input_matches"))
                 if staged_hx:
                     typed = before
                     actions = ["HX (already verified in input field)"]
-                elif not self._hx_read_boundary(before):
+                elif not hx_read_boundary(before):
                     return {"ok": False, "outcome": "hx_boundary_not_verified",
                             "screen": before, "actions": [], "cms_command_complete": None}
                 else:
                     self.command("MoveCursor(22,0)")
                     check = self.snapshot()
-                    if (not self._hx_read_boundary(check)
+                    if (not hx_read_boundary(check)
                             or host_display(check) != host_display(before)):
                         return {"ok": False, "outcome": "hx_boundary_changed",
                                 "screen": check, "actions": [], "cms_command_complete": None}
                     self.command('String("HX")')
                     typed = self.snapshot(_expected_input="HX")
-                    if (not self._hx_read_boundary(typed, staged_hx=True)
+                    if (not hx_read_boundary(typed, staged_hx=True)
                             or not typed.get("_expected_input_matches")
                             or host_display(typed) != host_display(check)):
                         return {"ok": False, "outcome": "hx_input_not_verified",
