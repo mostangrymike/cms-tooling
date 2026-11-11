@@ -6,7 +6,8 @@ are disabled by default.
 
 See [setup and tool documentation](README-cms-mcp.md),
 [qualification boundaries](PIPELINE-READINESS.md), and
-[migration provenance](MIGRATION.md).
+[migration provenance](MIGRATION.md). The mandatory host-side TLS bridge is
+documented in [BRIDGE.md](BRIDGE.md).
 
 The [version 1 progress checkpoint](V1-PROGRESS.md) records the disposable
 end-to-end development finish line, completed work and exact restart steps.

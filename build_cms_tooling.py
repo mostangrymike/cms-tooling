@@ -49,6 +49,7 @@ EXCLUDED_SOURCES = {
     "cms_telnet_driver.py": "Line-mode Telnet driver documented in TELNET-DRIVER.md; the supported bundle uses the reviewed py3270/tnz transport.",
     "test_cms_telnet_driver.py": "Offline tests for the excluded line-mode driver.",
     "github_tls_bridge.py": "Host-side plain-HTTP to HTTPS bridge process; deployed on the workstation, never inside the guest tooling bundle.",
+    "test_github_tls_bridge.py": "Offline tests for the host-side bridge; CI runs them directly because the bridge itself is not shipped.",
     "s3270_session.py": "Ad-hoc pexpect s3270 scratch helper, superseded by tnz_transport and the Session emulator path.",
     "telnet_cms.py": "Early line-mode prototype, superseded by cms_telnet_driver.py.",
 }
