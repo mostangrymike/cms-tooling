@@ -10,7 +10,7 @@ assignees: ""
 A clear description of the problem.
 
 ## Environment
-- Component: (e.g. `github_tls_bridge.py`, CMS MCP, telnet/FTP/upload/capture)
+- Component: (e.g. `github_tls_bridge.py`, Telnet driver, FTP helper, minidisk planner)
 - OS/runtime: 
 - Version/commit: 
 - Target/path details (if relevant): — **redact secrets**

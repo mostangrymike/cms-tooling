@@ -1,20 +1,21 @@
 # Contributing to cms-tooling
 
-`cms-tooling` provides tooling for z/VM CMS development and validation (CMS MCP/server helpers, upload/capture/edit utilities, the GitHub TLS bridge, and validation/fixture harnesses).
+`cms-tooling` provides tooling for z/VM CMS development and validation: the line-mode Telnet driver, the FTP transfer helper, the minidisk planner, the GitHub TLS bridge, and their tests.
 
 ## Before you start
-- Read `README.md` (and related docs like `README-cms-mcp.md`, `TELNET-DRIVER.md`, `CMS-C-RECIPE.md`) for context.
+- Read `README.md` (and related docs like `TELNET-DRIVER.md`, `MINIDISK-PROVISIONING.md`) for context.
 - Search existing issues/PRs to avoid duplicate work.
 
 ## Development notes
-- Keep changes focused and preserve compatibility with existing CMS workflows/targets (Hercules, telnet/3270/FTP paths as applicable).
+- Keep changes focused and preserve compatibility with existing CMS workflows/targets (Hercules, telnet/FTP paths).
 - **Never commit secrets.** Do not print or commit credentials, tokens, passwords, `GHCRED` material, or `Authorization` headers. Use local config (e.g. `~/.config/...`) and redacted logs.
 - For the TLS bridge (`github_tls_bridge.py`), avoid adding request/response capture of sensitive data by default.
 
 ## Validation
-- Run the relevant tests/validators for the area you changed, for example:
+- Run the relevant tests for the area you changed, for example:
   - `python3 -m py_compile <changed>.py`
-  - `python3 test_cms_*.py` / `python3 validate_cms_*.py` (as applicable to the change)
+  - `python3 -m unittest -v test_cms_build test_cms_telnet_driver test_cms_mdisk_plan test_github_tls_bridge`
+  - `python3 -B build_cms_tooling.py`
 - Describe what you ran and, if target-dependent, the environment used. Host/CI validation is not the same as live CMS target proof.
 
 ## Pull requests
