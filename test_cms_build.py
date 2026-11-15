@@ -96,7 +96,7 @@ class ManifestTests(unittest.TestCase):
         root = Path(build.__file__).resolve().parent
         files = build.source_files(root)
         self.assertEqual(len(files), len(set(files)))
-        for required in ("cms_telnet_driver.py", "cms_ftpput.py", "cms_mdisk_plan.py",
+        for required in ("cms_telnet_driver.py", "cms_ftpput.py",
                          "build_cms_tooling.py", "test_cms_build.py", "ci/cms-tooling.yml"):
             self.assertIn(required, files)
         for excluded in build.EXCLUDED_SOURCES:

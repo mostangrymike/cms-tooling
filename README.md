@@ -35,9 +35,10 @@ Protected CMS files, disks, directory entries, and other users' sessions are
 never modified without explicit authorization for that exact target. Host-level
 success does not prove CMS behaviour; report target validation separately.
 
-Minidisk scope, inventory contract, and the executor gates are in
-[MINIDISK-PROVISIONING.md](MINIDISK-PROVISIONING.md). Telnet driver behaviour
-and limits are in [TELNET-DRIVER.md](TELNET-DRIVER.md).
+Minidisk provisioning now lives in the separate
+[mostangrymike/cms-minidisk-provisioning](https://github.com/mostangrymike/cms-minidisk-provisioning)
+repository. Telnet driver behaviour and limits are in
+[TELNET-DRIVER.md](TELNET-DRIVER.md).
 
 This project originated in
 [mostangrymike/ibm-sandbox](https://github.com/mostangrymike/ibm-sandbox).
