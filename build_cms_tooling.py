@@ -22,15 +22,15 @@ import tempfile
 #: reached by following imports from the entry points below.
 SUPPORT_FILES = (
     "AGENTS.md", ".gitignore", "README.md", "TELNET-DRIVER.md", "BRIDGE.md",
-    "MINIDISK-PROVISIONING.md", "ci/cms-tooling.yml",
+    "ci/cms-tooling.yml",
 )
 
 #: Python files the distribution deliberately exposes.  Local modules they
 #: import are added transitively, so a new dependency cannot be forgotten.
 ENTRY_POINTS = (
     "build_cms_tooling.py", "cms_telnet_driver.py", "cms_ftpput.py",
-    "cms_credentials.py", "cms_mdisk_plan.py", "github_tls_bridge.py",
-    "test_cms_build.py", "test_cms_telnet_driver.py", "test_cms_mdisk_plan.py",
+    "cms_credentials.py", "github_tls_bridge.py",
+    "test_cms_build.py", "test_cms_telnet_driver.py",
     "test_github_tls_bridge.py",
 )
 

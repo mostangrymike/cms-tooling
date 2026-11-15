@@ -41,9 +41,12 @@
 
 ## Minidisk work
 
-- `cms_mdisk_plan.py` is read-only. It needs a recent complete inventory and
-  fails closed on stale, incomplete, overlapping, full-pack, or ineligible
-  evidence.
+Minidisk provisioning lives in the separate
+`mostangrymike/cms-minidisk-provisioning` repository. Use its planner and its
+inventory contract; do not duplicate provisioning logic here.
+
+- The planner is read-only. It needs a recent complete inventory and fails
+  closed on stale, incomplete, overlapping, full-pack, or ineligible evidence.
 - Directory changes are made by editing the CP source directory and activating
   it with `DIRECTXA`. Never edit the active directory in place, never invent a
   free extent from `DIRMAP` alone, and never use virtual device `0192`.
