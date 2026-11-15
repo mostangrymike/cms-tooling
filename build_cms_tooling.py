@@ -7,7 +7,6 @@ from datetime import datetime, timezone
 import gzip
 import hashlib
 import io
-from importlib.metadata import version
 import json
 from pathlib import Path
 import secrets
@@ -22,37 +21,24 @@ import tempfile
 #: Non-Python files the distribution promises to ship.  Everything else is
 #: reached by following imports from the entry points below.
 SUPPORT_FILES = (
-    "AGENTS.md", ".gitignore", "README.md", "MIGRATION.md", "README-cms-mcp.md", "VALIDATION-cms-mcp.md", "PIPELINE-READINESS.md",
-    "V1-PROGRESS.md", "CMS-C-RECIPE.md",
-    "requirements-cms-mcp.txt", "ZMCPRUN.EXEC", "ZMCPGET.EXEC", "ZMCPQUAL.EXEC", "ZMCPOUT.EXEC",
-    "fixtures/README.md", "fixtures/terminal-screens.json",
-    "fixtures/qualification/baseline/ZTQUAL.C", "fixtures/qualification/candidate/ZTQUAL.C",
-    "ci/cms-tooling.yml",
+    "AGENTS.md", ".gitignore", "README.md", "TELNET-DRIVER.md", "BRIDGE.md",
+    "MINIDISK-PROVISIONING.md", "ci/cms-tooling.yml",
 )
 
 #: Python files the distribution deliberately exposes.  Local modules they
 #: import are added transitively, so a new dependency cannot be forgotten.
 ENTRY_POINTS = (
-    "build_cms_tooling.py", "cms_mcp.py", "diagnose_cms.py", "verify_codex_cms.py",
-    "cms_native_review.py", "cms_rehearsal.py",
-) + tuple(f"validate_cms_{name}.py" for name in ("mcp", "login", "commands", "download", "edit", "upload", "operations", "rehearsal", "gdisk")) + tuple(
-    f"test_cms_{name}.py" for name in
-    ("build", "mcp", "policy", "screen", "terminal", "login", "startup", "capture", "commands", "download", "edit", "upload", "link_query", "fixtures", "operations", "rehearsal", "native_review", "compiler", "fixture", "fixture_audit", "fixture_output")
+    "build_cms_tooling.py", "cms_telnet_driver.py", "cms_ftpput.py",
+    "cms_credentials.py", "cms_mdisk_plan.py", "github_tls_bridge.py",
+    "test_cms_build.py", "test_cms_telnet_driver.py", "test_cms_mdisk_plan.py",
+    "test_github_tls_bridge.py",
 )
 
 #: Every tracked Python module that is deliberately not shipped, with the
 #: reason it stays out.  The build fails when a tracked module is missing from
 #: both this table and the import closure, so drift is a build error instead of
 #: a silent omission.
-EXCLUDED_SOURCES = {
-    "cms_ftpput.py": "Legacy CMS-to-FTP upload helper for the retired pipeline; no packaged code imports it.",
-    "cms_telnet_driver.py": "Line-mode Telnet driver documented in TELNET-DRIVER.md; the supported bundle uses the reviewed py3270/tnz transport.",
-    "test_cms_telnet_driver.py": "Offline tests for the excluded line-mode driver.",
-    "github_tls_bridge.py": "Host-side plain-HTTP to HTTPS bridge process; deployed on the workstation, never inside the guest tooling bundle.",
-    "test_github_tls_bridge.py": "Offline tests for the host-side bridge; CI runs them directly because the bridge itself is not shipped.",
-    "s3270_session.py": "Ad-hoc pexpect s3270 scratch helper, superseded by tnz_transport and the Session emulator path.",
-    "telnet_cms.py": "Early line-mode prototype, superseded by cms_telnet_driver.py.",
-}
+EXCLUDED_SOURCES: dict[str, str] = {}
 
 
 def tracked_python(root):
@@ -152,26 +138,12 @@ def source_files(root, entry_points=ENTRY_POINTS, support_files=SUPPORT_FILES,
 
 UNIT_CHECK = """
 import json, unittest
-suite = unittest.defaultTestLoader.discover('.', pattern='test_cms_*.py')
+suite = unittest.defaultTestLoader.discover('.', pattern='test_*.py')
 result = unittest.TextTestRunner(verbosity=1).run(suite)
 print(json.dumps({'passed': result.wasSuccessful() and not result.skipped,
     'tests_run': result.testsRun, 'failures': len(result.failures),
     'errors': len(result.errors), 'skipped': len(result.skipped)}))
 raise SystemExit(0 if result.wasSuccessful() and not result.skipped else 1)
-"""
-
-PREPARE_REVIEW = """
-import json, subprocess
-from pathlib import Path
-from cms_download import metadata, save_snapshot
-repo = Path('review-fixture').resolve()
-repo.mkdir()
-subprocess.run(['git', 'init', '-q', str(repo)], check=True)
-records = [line.ljust(80).encode('cp037') for line in Path('ZMCPRUN.EXEC').read_text(encoding='ascii').splitlines()]
-meta = metadata([f'ZM537EF1 EXEC A1 F 80 {len(records)} 2 01/01/00 00:00:00 FIXTURE'], ('ZM537EF1', 'EXEC', 'A1'))
-root = repo / 'sources'
-result = save_snapshot(root, repo, meta, records, [])
-print(json.dumps({'root': str(root), 'snapshot': Path(result['snapshot_directory']).name}))
 """
 
 
@@ -225,9 +197,8 @@ def run_json(cwd, arguments):
 def build(output_root, credential_file=None):
     root = Path(__file__).resolve().parent
     payloads = source_payloads(root, credential_file)
-    for program in ('git', 's3270', 'rexx'):
-        if not shutil.which(program):
-            raise RuntimeError(f"Full offline validation requires {program} on PATH")
+    if not shutil.which('git'):
+        raise RuntimeError("Full offline validation requires git on PATH")
     output_root = output_root.absolute()
     if any(path.is_symlink() for path in (output_root, *output_root.parents)):
         raise ValueError('Build output must not traverse symlinks')
@@ -242,8 +213,7 @@ def build(output_root, credential_file=None):
               'excluded_sources': dict(EXCLUDED_SOURCES),
               'known_credential_scan': 'passed' if credential_file else 'not_requested',
               'runtime': {'python': sys.version, 'platform': platform.platform(),
-                          'mcp': version('mcp'), 'py3270': version('py3270'),
-                          'tools': {name: shutil.which(name) for name in ('git', 's3270', 'rexx')}},
+                          'tools': {name: shutil.which(name) for name in ('git',)}},
               'live_connection_performed': False, 'checks': {}}
     try:
         with tempfile.TemporaryDirectory(prefix='cms_tooling_build_') as temp:
@@ -260,39 +230,8 @@ def build(output_root, credential_file=None):
                     raise ValueError(f'Extracted source hash differs: {name}')
             checks = report['checks']
             checks['unit_tests'] = run_json(isolated, ['-c', UNIT_CHECK])
-            checks['protocol_default'] = run_json(isolated, ['validate_cms_mcp.py'])
-            checks['protocol_auto'] = run_json(isolated, ['validate_cms_mcp.py', '--device', 'auto'])
-            checks['upload_disabled'] = run_json(isolated, ['validate_cms_upload.py'])
-            snapshot = run_json(isolated, ['-c', PREPARE_REVIEW])
-            review_path = directory / 'local-review-evidence.json'
-            checks['local_review'] = run_json(isolated, ['validate_cms_edit.py',
-                '--root', snapshot['root'], '--snapshot', snapshot['snapshot'], '--output', str(review_path)])
-            review = json.loads(review_path.read_text())
-            if not review.get('passed') or not all(review.get('verification', {}).values()):
-                raise ValueError('Isolated local review verification did not pass')
-            report['review_verification'] = review['verification']
-            operation_path = directory / 'operation-review-evidence.json'
-            edited = review['edited']
-            checks['operation_review'] = run_json(isolated, ['validate_cms_operations.py',
-                '--root', snapshot['root'], '--edit-id', edited['edit_id'],
-                '--plan-id', edited['plan_id'], '--plan-sha256', edited['plan_sha256'],
-                '--output', str(operation_path)])
-            operation = json.loads(operation_path.read_text())
-            if not operation.get('passed') or not all(operation.get('verification', {}).values()):
-                raise ValueError('Isolated operation review verification did not pass')
-            report['operation_verification'] = operation['verification']
-            rehearsal = run_json(isolated, ['validate_cms_rehearsal.py'])
-            if not rehearsal.get('passed') or not all(rehearsal.get('verification', {}).values()):
-                raise ValueError('Isolated transaction failure rehearsal did not pass')
-            with (directory / 'rehearsal-evidence.json').open('x') as output:
-                json.dump(rehearsal, output, indent=2)
-                output.write('\n')
-            checks['failure_rehearsal'] = {key: value for key, value in rehearsal.items() if key != 'suite'}
-            # Temporary working files are intentionally discarded after the test;
-            # the report retains verification results, not durable review links.
-            report['temporary_review_workspace_retained'] = False
-            if not checks['unit_tests']['passed'] or not checks['upload_disabled']['write_disabled_by_default']:
-                raise ValueError('Offline build gates failed')
+            if not checks['unit_tests']['passed']:
+                raise ValueError('Offline unit tests failed')
             report['passed'] = True
     except Exception as exc:
         report['error'] = str(exc)

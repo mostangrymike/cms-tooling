@@ -4,7 +4,7 @@
 This is the supported command path for long-running CMS work.  It speaks the
 line-mode Telnet service on the z/VM TCPIP stack (``192.168.200.2:23``), not the
 3270 screen protocol, and it is deliberately small and dependency-free so it can
-be used from scripts, CI, and the MCP server.
+be used from scripts and CI.
 
 Design rules
 ------------

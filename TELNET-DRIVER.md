@@ -2,11 +2,12 @@
 
 `cms_telnet_driver.py` is the supported command path for z/VM CMS work from
 macOS. It speaks the line-mode Telnet service on `192.168.200.2:23` (the z/VM
-TCPIP stack) instead of the 3270 screen protocol, so it works when s3270/x3270
-is stuck in CP READ, VM READ, or a blank buffer.
+TCPIP stack). There is no 3270 screen path in this tree.
 
-It is deliberately small and dependency-free (Python 3.9+, standard library
-only), which makes it usable from scripts, CI, and the MCP server.
+It is deliberately small and dependency-free (Python 3.12+, standard library
+only), which makes it usable from scripts and CI. File transfer is done over
+FTP with `cms_ftpput.py`, which drives the CMS FTP client from the same
+session.
 
 ## Why line mode
 
