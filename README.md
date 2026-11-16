@@ -42,3 +42,5 @@ repository. Telnet driver behaviour and limits are in
 
 This project originated in
 [mostangrymike/ibm-sandbox](https://github.com/mostangrymike/ibm-sandbox).
+
+# Production readiness note: see cms-tooling/PRODUCTION_READINESS.md for details
