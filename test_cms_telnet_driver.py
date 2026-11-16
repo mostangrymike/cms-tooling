@@ -1,10 +1,15 @@
 """Offline tests for cms_telnet_driver using a fake line-mode z/VM server."""
+import os
 import socket
+import tempfile
 import threading
 import time
 import unittest
+from pathlib import Path
+from unittest import mock
 
-from cms_telnet_driver import CmsSession, CmsTimeout, strip_telnet
+from cms_telnet_driver import (CmsSession, CmsTimeout, load_credentials,
+                               strip_telnet)
 
 
 class FakeCmsServer(threading.Thread):
@@ -145,6 +150,15 @@ class DriverTests(unittest.TestCase):
 
     def test_telnet_stripper(self):
         self.assertEqual(strip_telnet(b"\xff\xfd\x28hello\xff\xfb\x03"), b"hello")
+
+    def test_load_credentials_expands_home(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            creds = Path(tmp) / "credentials.json"
+            creds.write_text('{"userid": "U", "password": "P"}',
+                             encoding="utf-8")
+            with mock.patch.dict(os.environ, {"HOME": tmp}):
+                self.assertEqual(load_credentials("~/credentials.json"),
+                                 ("U", "P"))
 
 
 if __name__ == "__main__":

@@ -4,6 +4,8 @@ Newest first. What landed, not proof claims. Detailed work log is `NOTES.md`.
 
 ## Unreleased
 
+- Fix `cms_telnet_driver.py` missing `import os`, which broke every live
+  connection at credential loading; add a tilde-expansion regression test.
 - Add canonical state stack: `STATUS.md`, `ROADMAP.md`, `docs/INDEX.md`,
   `CHANGELOG.md`, and a state-precedence block in `AGENTS.md`.
 

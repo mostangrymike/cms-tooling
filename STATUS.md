@@ -10,13 +10,13 @@ disagrees with this page, this page wins. Last updated 2026-11-16.
 | Branch | `main` |
 | Latest commit | `d77b9c4` — register profile test modules as build entry points |
 | Build | `python3 -B build_cms_tooling.py` (offline, no CMS) |
-| Tests | 115 tests, 0 failures/errors; Python 3.12 and 3.14 |
+| Tests | 116 tests, 0 failures/errors; Python 3.12 and 3.14 |
 | CI | `cms tooling offline build` and `Offline tests (profiles)` — **green** |
 
 ## What works
 
 - Line-mode Telnet driver with one-command-at-a-time capture, RC, intervention
-  and recovery (`cms_telnet_driver.py`).
+  and recovery (`cms_telnet_driver.py`); credentials paths expand `~`.
 - FTP transfer driven from the same Telnet session (`cms_ftpput.py`).
 - Profile-driven destinations: `cms_profiles.py`, `~/.config/cms-tooling/cms_profiles.json`,
   selected by `--profile` / `profile_name`. **No destination environment variables.**
