@@ -1,0 +1,15 @@
+name: Offline tests (profiles)
+on:
+  push:
+  pull_request:
+jobs:
+  offline-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v4
+        with:
+          python-version: '3.12'
+      - name: Run unit tests (offline)
+        run: |
+          python -m unittest discover -v

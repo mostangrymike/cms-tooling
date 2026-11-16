@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import re
-import os
 import sys
 from cms_telnet_driver import CmsSession
 from cms_profiles import get_profile
@@ -52,16 +51,18 @@ def _read_ftp_prompt(session, timeout: int = 30, *, stream: bool = False) -> str
     return session._read_until(FTP_PROMPT, timeout=timeout, stream=stream)
 
 
-def _open_ftp(session, *, remote_directory: str | None = None,
-              stream: bool = False) -> None:
-    # Resolve FTP destination from profile if configured
+def _resolve_ftp_destination(profile_name: str | None = None) -> tuple[str, int]:
     host, port = DEFAULT_FTP_HOST, DEFAULT_FTP_PORT
-    profile_name = os.environ.get("CMS_PROFILE")
     if profile_name:
         prof = get_profile(profile_name)
         if prof:
             host = prof.get("ftp_host") or prof.get("host") or host
             port = int(prof.get("ftp_port") or prof.get("port") or port)
+    return host, port
+
+def _open_ftp(session, *, profile_name: str | None = None,
+              remote_directory: str | None = None, stream: bool = False) -> None:
+    host, port = _resolve_ftp_destination(profile_name)
     session._send(f"FTP {host} {port}")
     text = session._read_until(
         re.compile(r"Enter user id|USER |Password|PASS |Command:|220 |331 "),
@@ -93,21 +94,21 @@ def _transfer(session, command: str, *, stream: bool = False) -> str:
     return response
 
 
-def put_files_on_session(session, files, *, remote_directory=None, verbose=False):
+def put_files_on_session(session, files, *, profile_name: str | None = None, remote_directory=None, verbose=False):
     """PUT from CMS using an already connected CMS Telnet session."""
-    _open_ftp(session, remote_directory=remote_directory, stream=verbose)
+    _open_ftp(session, profile_name=profile_name, remote_directory=remote_directory, stream=verbose)
     try:
         for local, remote in files:
             _transfer(session, f"PUT {_cms_fileid(local)} {_remote_name(remote)}",
-                      stream=verbose)
+                       stream=verbose)
     finally:
         session._send("QUIT")
         session._read_until(CMS_PROMPT, timeout=30, stream=verbose)
 
 
-def get_files_on_session(session, files, *, remote_directory=None, verbose=False):
+def get_files_on_session(session, files, *, profile_name: str | None = None, remote_directory=None, verbose=False):
     """GET to CMS using an already connected CMS Telnet session."""
-    _open_ftp(session, remote_directory=remote_directory, stream=verbose)
+    _open_ftp(session, profile_name=profile_name, remote_directory=remote_directory, stream=verbose)
     try:
         session._send("LOCSITE FIXRECFM 80")
         _read_ftp_prompt(session, stream=verbose)
@@ -119,7 +120,7 @@ def get_files_on_session(session, files, *, remote_directory=None, verbose=False
         session._read_until(CMS_PROMPT, timeout=30, stream=verbose)
 
 
-def put_files(files: list[tuple[str, str]], verbose: bool = True) -> None:
+def put_files(files: list[tuple[str, str]], profile_name: str | None = None, verbose: bool = True) -> None:
     """PUT CMS files to the local FTP server.
     
     files: list of (local_cms_fileid, remote_ftp_name). CMS file IDs may be
@@ -128,10 +129,10 @@ def put_files(files: list[tuple[str, str]], verbose: bool = True) -> None:
     with CmsSession(log_path="/tmp/cms_driver.log",
                     on_line=print if verbose else None) as session:
         session.connect()
-        put_files_on_session(session, files, verbose=verbose)
+        put_files_on_session(session, files, profile_name=profile_name, verbose=verbose)
 
 
-def get_files(files: list[tuple[str, str]], verbose: bool = True) -> None:
+def get_files(files: list[tuple[str, str]], profile_name: str | None = None, verbose: bool = True) -> None:
     """GET FTP files into CMS as fixed 80-byte source records.
 
     `files` is a list of (remote_ftp_name, local_cms_fileid) pairs. The local
@@ -140,17 +141,21 @@ def get_files(files: list[tuple[str, str]], verbose: bool = True) -> None:
     with CmsSession(log_path="/tmp/cms_driver.log",
                     on_line=print if verbose else None) as session:
         session.connect()
-        get_files_on_session(session, files, verbose=verbose)
+        get_files_on_session(session, files, profile_name=profile_name, verbose=verbose)
 
 
 if __name__ == "__main__":
+    import argparse
+    ap = argparse.ArgumentParser(description="CMS FTP put/get helper with profiles (no env vars)")
+    ap.add_argument("--profile", help="CMS profile name for FTP destination (no env vars)")
+    ap.add_argument("pairs", nargs="*", help="local_cms_fileid remote_ftp_name [local_cms_fileid remote_ftp_name ...]")
+    ns = ap.parse_args()
     pairs = []
-    args = sys.argv[1:]
-    if not args or len(args) % 2:
-        print("usage: cms_ftpput.py local_cms_fileid remote_ftp_name [local_cms_fileid remote_ftp_name ...]")
+    if not ns.pairs or len(ns.pairs) % 2:
+        print("usage: cms_ftpput.py [--profile NAME] local_cms_fileid remote_ftp_name ...")
         print("  local_cms_fileid: CMS filename+filetype (e.g., GITPMK EXEC)")
         print("  remote_ftp_name: name on FTP server (e.g., GITPMK EXEC)")
         raise SystemExit(2)
-    for i in range(0, len(args), 2):
-        pairs.append((args[i], args[i + 1]))
-    put_files(pairs)
+    for i in range(0, len(ns.pairs), 2):
+        pairs.append((ns.pairs[i], ns.pairs[i+1]))
+    put_files(pairs, profile_name=ns.profile)

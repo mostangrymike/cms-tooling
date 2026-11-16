@@ -34,13 +34,14 @@ from __future__ import annotations
 
 import argparse
 import json
-import os
+# os is no longer used for env-based overrides; profile selection is via constructor
 import re
 import select
 import socket
 import sys
 import time
 from dataclasses import dataclass
+  # Profiles are selected via constructor (no environment variables)
 from typing import Callable, Iterable, Optional
 
 # ---------------------------------------------------------------------------
@@ -161,6 +162,7 @@ class CmsSession:
         userid: Optional[str] = None,
         password: Optional[str] = None,
         credentials_path: str = DEFAULT_CREDS,
+        profile_name: Optional[str] = None,
         *,
         log_path: Optional[str] = None,
         quiet_period: float = 0.35,
@@ -183,10 +185,29 @@ class CmsSession:
         self._sock: Optional[socket.socket] = None
         self._pending = b""
         self._logged_in = False
+        # Profile-based overrides are applied below if a profile_name is provided
         self._log_handle = None
         if log_path:
             self._log_handle = open(os.path.expanduser(log_path), "a", encoding="utf-8")
             self._log("session", f"open {host}:{port}")
+        # Apply profile-based overrides if a profile_name was supplied
+        if profile_name:
+            try:
+                from cms_profiles import get_profile
+                prof = get_profile(profile_name)
+                if prof:
+                    new_host = prof.get("host")
+                    new_port = prof.get("port")
+                    if new_host:
+                        self.host = new_host
+                    if new_port:
+                        try:
+                            self.port = int(new_port)
+                        except (ValueError, TypeError):
+                            pass
+            except Exception:
+                # Silently ignore profile issues; fall back to explicit host/port
+                pass
 
     # -- logging ----------------------------------------------------------
 
@@ -545,6 +566,7 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--log", default=None, help="append sanitized I/O log here")
     parser.add_argument("--no-stream", action="store_true", help="buffer output instead of streaming")
     parser.add_argument("-v", "--verbose", action="store_true")
+    parser.add_argument("--profile", help="CMS profile name to use for host/port overrides (no env vars)")
     sub = parser.add_subparsers(dest="mode", required=True)
     sub.add_parser("probe", help="connect, log on, and report CMS state")
     run = sub.add_parser("run", help="run one command")
@@ -584,6 +606,7 @@ def main(argv: Optional[list[str]] = None) -> int:
         credentials_path=args.credentials,
         log_path=args.log,
         verbose=args.verbose,
+        profile_name=args.profile,
         on_line=on_line,
     )
     try:
