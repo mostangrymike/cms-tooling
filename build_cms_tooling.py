@@ -28,9 +28,15 @@ SUPPORT_FILES = (
 #: Python files the distribution deliberately exposes.  Local modules they
 #: import are added transitively, so a new dependency cannot be forgotten.
 ENTRY_POINTS = (
-    "build_cms_tooling.py", "cms_telnet_driver.py", "cms_ftpput.py",
+    "build_cms_tooling.py", "cms_telnet_driver.py", "cms_ftpput.py", "cms_folder.py",
     "cms_credentials.py", "github_tls_bridge.py",
+    "cms_mdisk_plan.py", "cms_mdisk_directory.py", "cms_mdisk_cp.py",
+    "cms_mdisk_inventory.py", "cms_mdisk_lifecycle.py", "cms_mdisk_receipts.py",
     "test_cms_build.py", "test_cms_telnet_driver.py",
+    "test_cms_ftptransfer.py", "test_cms_mdisk_plan.py",
+    "test_cms_mdisk_directory.py", "test_cms_mdisk_cp.py",
+    "test_cms_mdisk_inventory.py", "test_cms_mdisk_lifecycle.py",
+    "test_cms_mdisk_receipts.py", "test_cms_folder.py",
     "test_github_tls_bridge.py",
 )
 
