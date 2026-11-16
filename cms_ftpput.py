@@ -3,14 +3,18 @@
 from __future__ import annotations
 
 import re
+import os
 import sys
 from cms_telnet_driver import CmsSession
+from cms_profiles import get_profile
 
 FTP_PROMPT = re.compile(r"(?m)^\s*Command:\s*$")
 CMS_PROMPT = re.compile(r"(?m)^\s*\.\s*$")
 CMS_FILEID = re.compile(r"[A-Za-z0-9@$#+_-]{1,8}\Z")
 CMS_FILEMODE = re.compile(r"[A-Za-z][0-6]?\Z")
 FTP_PATH = re.compile(r"[A-Za-z0-9._/-]+\Z")
+DEFAULT_FTP_HOST = "192.168.200.1"
+DEFAULT_FTP_PORT = 2121
 
 
 class CmsFtpError(RuntimeError):
@@ -50,7 +54,15 @@ def _read_ftp_prompt(session, timeout: int = 30, *, stream: bool = False) -> str
 
 def _open_ftp(session, *, remote_directory: str | None = None,
               stream: bool = False) -> None:
-    session._send("FTP 192.168.200.1 2121")
+    # Resolve FTP destination from profile if configured
+    host, port = DEFAULT_FTP_HOST, DEFAULT_FTP_PORT
+    profile_name = os.environ.get("CMS_PROFILE")
+    if profile_name:
+        prof = get_profile(profile_name)
+        if prof:
+            host = prof.get("ftp_host") or prof.get("host") or host
+            port = int(prof.get("ftp_port") or prof.get("port") or port)
+    session._send(f"FTP {host} {port}")
     text = session._read_until(
         re.compile(r"Enter user id|USER |Password|PASS |Command:|220 |331 "),
         timeout=45, stream=stream)
