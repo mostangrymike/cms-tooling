@@ -1,5 +1,20 @@
 # Local z/VM CMS automation
 
+## State precedence (authoritative)
+
+When determining project state, gaps, or TODO, read in this order and do not
+substitute older files:
+
+1. `STATUS.md` — the only file that declares current state.
+2. `ROADMAP.md` — the only gap/TODO list.
+3. `CHANGELOG.md` — delivered work.
+4. `docs/INDEX.md` — classifies every doc as current/history/reference/runbook/draft.
+5. `NOTES.md` — history only.
+6. `git log --oneline` — what actually merged.
+
+`STEADY_STATE.md` and `PR_DESCRIPTION.md` are drafts; do not treat them as
+current state.
+
 - Preserve existing source and transfer scripts; do not reset unrelated changes.
 - Use the repository `.venv/bin/python`.
 - Command access is line-mode Telnet to `192.168.200.2:23` through

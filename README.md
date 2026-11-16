@@ -4,6 +4,11 @@ Guarded local automation for IBM z/VM CMS. Connections use the z/VM TCPIP
 line-mode Telnet service only; file transfer uses FTP. There is no 3270
 terminal, no screen scraping, and no MCP server in this tree.
 
+> **Start here:** [`STATUS.md`](STATUS.md) is the only current-state file.
+> Remaining work is in [`ROADMAP.md`](ROADMAP.md); delivered work in
+> [`CHANGELOG.md`](CHANGELOG.md); doc classification in
+> [`docs/INDEX.md`](docs/INDEX.md).
+
 ## Components
 
 | Path | Purpose |
