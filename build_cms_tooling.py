@@ -37,6 +37,8 @@ ENTRY_POINTS = (
     "test_cms_mdisk_directory.py", "test_cms_mdisk_cp.py",
     "test_cms_mdisk_inventory.py", "test_cms_mdisk_lifecycle.py",
     "test_cms_mdisk_receipts.py", "test_cms_folder.py",
+    "test_cms_profiles.py", "test_cms_profiles_offline_end2end.py",
+    "test_cms_telnet_profile.py",
     "test_github_tls_bridge.py",
 )
 
