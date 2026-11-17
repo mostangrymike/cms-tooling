@@ -1,0 +1,17 @@
+BEGIN {
+  t = "abcabc"
+  print "longest", match(t, "b|bc"), RSTART, RLENGTH
+  print "alt2", match(t, "ab|abc"), RSTART, RLENGTH
+  print "class", ("A9_" ~ /^[[:alpha:]][[:digit:]]_$/),
+    ("Z_" ~ /^[[:alpha:]][[:digit:]]_$/)
+  print "interval", ("aaaa" ~ /^a{2,4}$/), ("aaaaa" ~ /^a{2,4}$/)
+  print "backref", ("abab" ~ /^(ab)\1$/), ("abba" ~ /^(ab)\1$/)
+  print "nested", match("x-12.5-y", "(([0-9]+)[.]([0-9]+))"), RSTART, RLENGTH
+  print "groups", match("p=q/r", "([a-z])=([a-z])/([a-z])"), RSTART, RLENGTH
+  print "anchor", ("abc" ~ /^abc$/), ("abc" ~ /^bc$/)
+  print "dot", ("a.c" ~ /a[.]c/), ("abc" ~ /a[.]c/)
+  print "case", ("ABC" ~ /abc/), ("ABC" ~ /[A-C][A-C][A-C]/)
+  print "sub", gsub("[aeiou]", "<>", t), t
+  print "sub2", sub("^abc", "Z", t), t
+  print "bool", !("x" ~ /y/), ("x" ~ /x/) && !("" ~ /x/)
+}

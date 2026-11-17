@@ -1,0 +1,4 @@
+BEGIN { print "ARGC", ARGC
+  for (i = 0; i < ARGC; i++) print "ARGV", i, ARGV[i] }
+{ print FILENAME ":" FNR ":" NR ":" NF ":" $0 "|" $1 "|" $NF }
+END { print "TOTAL", NR }

@@ -1,0 +1,3 @@
+BEGIN { ARGV[1] = "D2 DATA A"; ARGC = 2; print "set", ARGC, ARGV[1] }
+{ print "rec", FILENAME, $0 }
+END { print "files", FILENAME, NR }

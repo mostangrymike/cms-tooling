@@ -1,0 +1,6 @@
+BEGIN {
+  print "power", 2 ^ 3 ^ 2, -2 ^ 2, (-2) ^ 2, 4 ^ -1
+  print "regex", ("abc" ~ /abc/),
+    match("x-12.5-y", /([0-9]+)[.]([0-9]+)/), RSTART, RLENGTH
+  printf "zero %05d %05.2f %.2f\n", 7, 3.14, 3.14
+}

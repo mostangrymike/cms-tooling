@@ -1,0 +1,20 @@
+function fact(n) { if (n <= 1) return 1; return n * fact(n - 1) }
+function add(a, b) { return a + b }
+BEGIN {
+  a["x"] = 1; a["y"] = 2
+  n = 0
+  for (k in a) n += a[k]
+  print "array", n, length(a)
+  print "fact", fact(6), "add", add(2, 3)
+  s = "a:b::c"
+  print "split", split(s, p, ":"), p[1], p[2], p[3], p[4]
+  print "substr", substr("abcdef", 2, 3), substr("abcdef", 4)
+  print "index", index("abcdef", "cd")
+  print "sprintf", sprintf("%5.2f|%d|%s", 3.14159, 42, "z")
+  print "case", toupper("aBc"), tolower("aBc")
+  print "cmp", (10 < 9), ("10" < "9"), (10 == 10.0)
+  print "arith", 7 % 3, 7 / 2, 7 * 3, 7 - 2
+  printf "fmt %s %d %.3f\n", "x", 7, 1.5
+  print "multi", 1 +
+    2, "cont"
+}

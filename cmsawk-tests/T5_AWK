@@ -1,0 +1,24 @@
+BEGIN { print "start" }
+{
+  if (NR == 1)
+    print "first", $0
+  else {
+    print "other", NR
+  }
+  i = 0
+  while (i < 3) {
+    i++
+    if (i == 2)
+      continue
+    print "while", i
+  }
+  do {
+    j++
+  } while (j < 3)
+  print "do", j
+  if (NF > 3) next
+  print "after", $0
+  # a comment line
+  print "tail"
+}
+END { print "end", NR }
