@@ -4,6 +4,12 @@ Newest first. What landed, not proof claims. Detailed work log is `NOTES.md`.
 
 ## Unreleased
 
+- Add `docs/OE_BFS.md`: OpenExtensions/BFS verification, `/bin` inventory,
+  NLS gaps (`iconv`, `tar`), and the `EXEC OPENVM` profile gotcha.
+- Add `docs/TLS_ASSESSMENT.md`: captured ClientHello, TLS 1.2 ceiling, no SNI
+  or ECDHE, and no outbound route from the guest.
+- Mount the OE root from `PROFILE EXEC` on MAINT so every logon has BFS;
+  original kept as `PROFILE EXECSAV`.
 - Fix `cms_telnet_driver.py` missing `import os`, which broke every live
   connection at credential loading; add a tilde-expansion regression test.
 - Add canonical state stack: `STATUS.md`, `ROADMAP.md`, `docs/INDEX.md`,

@@ -30,3 +30,10 @@ retire.
 | `../Production_Runbook.md` | runbook | Production promotion and rollout. |
 | `../STEADY_STATE.md` | draft | Planning notes; fold into STATUS/ROADMAP. |
 | `../PR_DESCRIPTION.md` | draft | PR body draft; safe to retire. |
+
+## `docs/` documents
+
+| Path | Kind | Notes |
+|---|---|---|
+| `OE_BFS.md` | current | OpenExtensions/BFS inventory, gaps, logon mount. |
+| `TLS_ASSESSMENT.md` | current | Outbound TLS ceiling and network reach of the 6.3 guest. |

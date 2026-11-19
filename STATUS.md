@@ -1,7 +1,7 @@
 # Status
 
 **Canonical current-state file for `cms-tooling`.** If any other document
-disagrees with this page, this page wins. Last updated 2026-11-16.
+disagrees with this page, this page wins. Last updated 2026-11-19.
 
 ## Right now
 
@@ -27,12 +27,29 @@ disagrees with this page, this page wins. Last updated 2026-11-16.
 - Host-side plain-HTTP-to-HTTPS bridge with policy/credential boundary
   (`github_tls_bridge.py`).
 
+## Target environment (verified 2026-11-19)
+
+| Fact | Value |
+|---|---|
+| Guest | `MAINT AT TACOTICO`; z/VM 6.3.0, CMS 27 SL 1302 |
+| OpenExtensions | installed; BFS `VMSYS` mounts at `/` from `PROFILE EXEC` |
+| Shell | `OPENVM RUN /bin/sh`; `cms` works from inside the shell |
+| `iconv` | only the `IBM-1047` charmap; no UTF-8 or ISO8859 conversion |
+| `tar` | unusable (filename translation error 83) |
+| Outbound TLS | TLS 1.2 maximum; no SNI, no ECDHE, no AEAD |
+| Outbound network | none; `192.168.200.0/24` is not NATed |
+
+Details: [`docs/OE_BFS.md`](docs/OE_BFS.md),
+[`docs/TLS_ASSESSMENT.md`](docs/TLS_ASSESSMENT.md).
+
 ## What is not done
 
 - No live production rollout; planner and lifecycle are offline/read-only.
 - Deletion remains plan-only behind signed receipts.
 - No dedicated offline end-to-end lifecycle harness (plan → create → activate
   → delete) beyond profile resolution tests.
+- No CMSToBFS bridge: no file-format/encoding conversion, no `make`/`c89`
+  driver that emits a CMS MODULE.
 
 ## Read next
 
