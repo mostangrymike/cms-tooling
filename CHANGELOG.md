@@ -4,6 +4,13 @@ Newest first. What landed, not proof claims. Detailed work log is `NOTES.md`.
 
 ## Unreleased
 
+- Add `cms-execs/CMS2BFS.EXEC` and `cms-execs/BFS2CMS.EXEC`: ASCII text
+  transfer between CMS files and BFS using `OPENVM PUTBFS`/`GETBFS` with
+  explicit `1047`↔`819` translation. Byte-exact round trips at 80 and 300
+  columns; RC 28 on a missing file in either direction.
+- Record in `docs/OE_BFS.md`: numeric code pages only (`1208` fails),
+  `TRANSLATE` is not implied, full file mode required, MODULE does not round
+  trip, and `/bin/c89` has no compiler backend.
 - Add `docs/OE_BFS.md`: OpenExtensions/BFS verification, `/bin` inventory,
   NLS gaps (`iconv`, `tar`), and the `EXEC OPENVM` profile gotcha.
 - Add `docs/TLS_ASSESSMENT.md`: captured ClientHello, TLS 1.2 ceiling, no SNI

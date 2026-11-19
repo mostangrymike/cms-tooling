@@ -1,0 +1,17 @@
+/* BFS2CMS EXEC - copy a BFS text file to a CMS file as EBCDIC records.
+ *
+ * Usage:  BFS2CMS path fn ft [fm]
+ *
+ * fm defaults to A1. Lines are split on newline; a long line becomes a
+ * variable-length record, so nothing is truncated at 80 columns. An existing
+ * CMS file is replaced. For binary or MODULE files use OPENVM GETBFS
+ * directly with NOTRANSLATE.
+ */
+parse arg path fn ft fm .
+if path = '' | fn = '' | ft = '' then do
+  say 'Usage: BFS2CMS path fn ft [fm]'
+  exit 24
+end
+if fm = '' then fm = 'A1'
+'OPENVM GETBFS' path fn ft fm '(REPLACE TRANSLATE 819 TO 1047'
+exit rc

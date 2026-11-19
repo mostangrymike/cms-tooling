@@ -68,12 +68,59 @@ Verified working: `sed s/b/X/` on `abc` gives `aXc`; `grep -c` counts 19 in
 | `iconv` unusable | only the `IBM-1047` charmap; every UTF-8 or ISO8859 conversion fails with error 83. |
 | `tar` broken | `filename translation initialization: error 83`; writes a 0-byte archive. |
 | Missing tools | `curl wget openssl git jq python perl base64 sha256sum patch timeout ssh` |
-| `cmsfile` syntax | needs the OE Command Reference; CMS-to-BFS attempts fail with `GSU9971`. |
+| `c89` has no compiler | `DMSWCC616W The C compiler (CBXFINIT) does not exist`; compile on CMS. |
+| `cmsfile` | not a converter; it needs an existing external link (`GSU9971`). |
 | `OPENVM RUN` parser | `(` starts an option list, so inline C source needs a file. |
 | Session scope | each Telnet connection is a fresh CMS IPL; mounts do not survive a disconnect. |
 
-Do not plan on `iconv` or `tar` for the CMS-to-BFS bridge. Translation has to
-happen in our own code.
+`iconv` and `tar` are not needed for the CMS-to-BFS bridge: `OPENVM PUTBFS`
+and `OPENVM GETBFS` translate code pages themselves.
+
+## CMS to BFS and back
+
+`openvm putbfs` and `OPENVM GETBFS` are the converter. Both take a numeric
+source and target code page and call no external translator, so the missing
+charmaps do not matter.
+
+Two execs are shipped in [`../cms-execs/`](../cms-execs/):
+
+```
+CMS2BFS fn ft fm [path]     path defaults to /tmp/<fn>.<ft> in lower case
+BFS2CMS path fn ft [fm]     fm defaults to A1
+```
+
+They expand to:
+
+```
+OPENVM PUTBFS fn ft fm path (REPLACE TRANSLATE 1047 TO 819
+OPENVM GETBFS path fn ft fm (REPLACE TRANSLATE 819 TO 1047
+```
+
+Verified 2026-11-19 on `MAINT`:
+
+| Case | Result |
+|---|---|
+| `PROFILE EXEC` (F 80, 24 records) | 1944 bytes; round trip `cmp` clean |
+| one 300-column line | CMS record becomes V 300; round trip `cmp` clean |
+| missing CMS file | `DMSOVH1184E`, RC 28 |
+| missing BFS file | `DMSOVH2113E Object does not exist`, RC 28 |
+
+### Rules that bite
+
+- Code pages must be numeric. `1047` and `819` work; `1208` (UTF-8) fails with
+  `DMSOVH639E Error in PIPE routine; return code was 660`, and names such as
+  `IBM-1047` are rejected with `DMSPCL395E Invalid number`. Non-ASCII text
+  therefore needs our own table, not this option.
+- `TRANSLATE` is not implied. A variable-format CMS file is copied byte for
+  byte, so without it the BFS file holds EBCDIC.
+- Pass a full file mode (`A1`). `GETBFS ... LNG TXT A` produced `LNG TXT A0`.
+- Fixed-format padding survives: an 80-column record becomes 81 bytes, 80
+  characters plus newline. Strip it on the BFS side if a tool cares.
+- Text only. A CMS MODULE does not round trip: record boundaries are lost, and
+  a `NOTRANSLATE` copy did not compare equal. Move binaries with FTP.
+- `od -c` and console `cat` misreport some characters here (same NLS gap).
+  Trust `od -An -tx1` and `cmp`, not the pretty printer.
+- Command help: `HELP OPENVM PUTbfs` / `HELP OPENVM GETbfs`.
 
 ## Logon integration
 

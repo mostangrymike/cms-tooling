@@ -26,6 +26,9 @@ disagrees with this page, this page wins. Last updated 2026-11-19.
   lifecycle (`cms_mdisk_*`).
 - Host-side plain-HTTP-to-HTTPS bridge with policy/credential boundary
   (`github_tls_bridge.py`).
+- CMS↔BFS ASCII text bridge (`cms-execs/CMS2BFS.EXEC`, `cms-execs/BFS2CMS.EXEC`)
+  built on `OPENVM PUTBFS`/`GETBFS` with explicit `1047`↔`819` translation;
+  round trips verified byte-exact.
 
 ## Target environment (verified 2026-11-19)
 
@@ -36,6 +39,7 @@ disagrees with this page, this page wins. Last updated 2026-11-19.
 | Shell | `OPENVM RUN /bin/sh`; `cms` works from inside the shell |
 | `iconv` | only the `IBM-1047` charmap; no UTF-8 or ISO8859 conversion |
 | `tar` | unusable (filename translation error 83) |
+| `c89` | present but no compiler backend (`CBXFINIT`) |
 | Outbound TLS | TLS 1.2 maximum; no SNI, no ECDHE, no AEAD |
 | Outbound network | none; `192.168.200.0/24` is not NATed |
 

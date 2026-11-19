@@ -44,13 +44,15 @@ claim live-CMS validation it does not have.
 Verified environment facts are in `docs/OE_BFS.md` and
 `docs/TLS_ASSESSMENT.md`. Remaining work:
 
-- **CMS↔BFS bridge.** Move files between `fn ft fm` and BFS without truncation
-  or record-format damage. Do the EBCDIC/ASCII translation in code: the guest
-  `iconv` has only the `IBM-1047` charmap, and `tar` fails with the same NLS
-  error.
+- **CMS↔BFS bridge (text).** Done for ASCII text: `cms-execs/CMS2BFS.EXEC`
+  and `cms-execs/BFS2CMS.EXEC` use `OPENVM PUTBFS`/`GETBFS` with explicit
+  `TRANSLATE 1047 TO 819`; round trips are byte-exact at 80 and 300 columns.
+  See `docs/OE_BFS.md`. Remaining: UTF-8 (code page `1208` fails), and binary
+  or MODULE transfer, which must stay on FTP.
 - **`mkmodule` driver.** Stage BFS sources as CMS files, run CMSCLNK, capture
   the listing and RC, copy the MODULE back. `make`/`c89` in the guest cannot
-  emit a CMS MODULE.
+  emit a CMS MODULE: `/bin/c89` reports
+  `DMSWCC616W The C compiler (CBXFINIT) does not exist`.
 - **Long-line handling.** CMS records are 80 columns; BFS is byte stream. Pick
   a framing rule and test it at both ends.
 - **No outbound HTTPS.** Keep the gateway pattern; do not attempt native TLS.

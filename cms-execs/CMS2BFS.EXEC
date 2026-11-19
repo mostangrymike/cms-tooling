@@ -1,0 +1,20 @@
+/* CMS2BFS EXEC - copy a CMS text file to a BFS file as ASCII text.
+ *
+ * Usage:  CMS2BFS fn ft fm [path]
+ *
+ * path defaults to /tmp/<fn>.<ft> in lower case. An existing BFS file is
+ * replaced. Records become newline-terminated lines; fixed-format trailing
+ * blanks are preserved. For binary or MODULE files use OPENVM PUTBFS
+ * directly with NOTRANSLATE; record boundaries are not recoverable.
+ */
+parse arg fn ft fm path .
+if fn = '' | ft = '' | fm = '' then do
+  say 'Usage: CMS2BFS fn ft fm [path]'
+  exit 24
+end
+lower = 'abcdefghijklmnopqrstuvwxyz'
+upper = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ'
+if path = '' then path = '/tmp/' || translate(fn, lower, upper) || '.' ||,
+                          translate(ft, lower, upper)
+'OPENVM PUTBFS' fn ft fm path '(REPLACE TRANSLATE 1047 TO 819'
+exit rc
