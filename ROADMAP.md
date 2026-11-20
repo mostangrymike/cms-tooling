@@ -49,10 +49,13 @@ Verified environment facts are in `docs/OE_BFS.md` and
   `TRANSLATE 1047 TO 819`; round trips are byte-exact at 80 and 300 columns.
   See `docs/OE_BFS.md`. Remaining: UTF-8 (code page `1208` fails), and binary
   or MODULE transfer, which must stay on FTP.
-- **`mkmodule` driver.** Stage BFS sources as CMS files, run CMSCLNK, capture
-  the listing and RC, copy the MODULE back. `make`/`c89` in the guest cannot
-  emit a CMS MODULE: `/bin/c89` reports
-  `DMSWCC616W The C compiler (CBXFINIT) does not exist`.
+- **`mkmodule` driver.** Done: `cms-execs/MKMODULE.EXEC` stages a BFS source to
+  `name C A1` and runs the site `CMSCLNK` exec (`GCCE` → `ASSEMBLE` → `LOAD`
+  → `GENMOD`). `PLAIN` is the default; `NAPI` needs `GITCAPI`/`GITINFA`
+  ASSEMBLE files that the base install lacks. Long source lines compile; the
+  real limit is the assembler card, so identifiers must stay short.
+  See `docs/OE_BFS.md`. Remaining: pull the listing or MODULE back for
+  inspection without FTP (a MODULE cannot round trip through `GETBFS`).
 - **Long-line handling.** CMS records are 80 columns; BFS is byte stream. Pick
   a framing rule and test it at both ends.
 - **No outbound HTTPS.** Keep the gateway pattern; do not attempt native TLS.

@@ -4,6 +4,12 @@ Newest first. What landed, not proof claims. Detailed work log is `NOTES.md`.
 
 ## Unreleased
 
+- Add `cms-execs/MKMODULE.EXEC`: stage a BFS C source onto `A`, run the site
+  `CMSCLNK`, report the RC, leave `name C A1` and `name LISTING A1`.
+  `PLAIN` default; verified build and run of a 2648-record source.
+- Record the build limits: 186-column comment and 163-column string literal
+  build, a 190-character identifier fails at assembly (`IFO026`); empty BFS
+  source fails with RC 40; `'CMSCLNK'` needs the `EXEC` prefix inside REXX.
 - Add `cms-execs/CMS2BFS.EXEC` and `cms-execs/BFS2CMS.EXEC`: ASCII text
   transfer between CMS files and BFS using `OPENVM PUTBFS`/`GETBFS` with
   explicit `1047`↔`819` translation. Byte-exact round trips at 80 and 300

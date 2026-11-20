@@ -122,6 +122,51 @@ Verified 2026-11-19 on `MAINT`:
   Trust `od -An -tx1` and `cmp`, not the pretty printer.
 - Command help: `HELP OPENVM PUTbfs` / `HELP OPENVM GETbfs`.
 
+## Building a MODULE from BFS source
+
+A source file that lives in BFS (where `sed`, `grep`, `make`, `diff` can work
+on it) is built with one command. `cms-execs/MKMODULE.EXEC` stages the file
+onto CMS and runs the site build exec `CMSCLNK` on `F`:
+
+```
+MKModule name path [NAPI|PLAIN]
+```
+
+`name` is the CMS file name, at most 8 characters. The staged source becomes
+`name C A1`, the listing `name LISTING A1`, and the output `name MODULE A1`.
+`PLAIN` is the default and links only PDPCLIB. `NAPI` also assembles
+`GITCAPI` and `GITINFA`, which are not part of the base install: without them
+`CMSCLNK` stops at `DMSASM002E File GITINFA ASSEMBLE not found`.
+
+`CMSCLNK` on `F1` is the existing driver: `GCCE` (compile to ASSEMBLE),
+`ASSEMBLE`, `LOAD`, `GENMOD`. It builds from the `A` disk, which is why the
+source is staged there rather than compiled in place.
+
+Verified 2026-11-20:
+
+| Case | Result |
+|---|---|
+| `S2SED C` (2648 records) staged, then built | `built S2DEF MODULE mode PLAIN`; module runs |
+| 186-column comment line | compiles and links |
+| 163-column string literal | compiles and links |
+| 190-character identifier | `IFO026 CHARACTERS APPEAR BETWEEN THE BEGIN AND CONTINUE COLUMNS ON CONTINUATION CARD`; assembly fails, RC 16 |
+| missing BFS source | `DMSOVH2113E`, RC 28 |
+| empty BFS source | `DMSOVH173E Empty output file ... not created`, RC 40 |
+| C syntax error | `CMSCLNK: C compile failed`, RC 12 |
+
+So record width is not the limit: a long line survives staging and compiles.
+The limit is the assembler card, so keep *identifiers* short; long comments and
+string literals are fine.
+
+A built MODULE stays on CMS. It cannot be copied to BFS: `GETBFS` drops record
+boundaries and the result does not compare equal.
+
+### Gotcha
+
+`'CMSCLNK' name` inside a REXX exec fails with `RC(-3)` even though the same
+name runs from the CMS prompt. Use `'EXEC CMSCLNK' name`, the same fix as
+`EXEC OPENVM`.
+
 ## Logon integration
 
 `PROFILE EXEC A` on MAINT mounts OE at every logon. Original preserved as

@@ -1,0 +1,47 @@
+/* MKModule EXEC - stage a BFS C source onto CMS and build a MODULE.
+ *
+ * Usage:  MKModule name path [NAPI|PLAIN]
+ *
+ * name is the CMS file name (<= 8 characters). path is the BFS source, which
+ * is copied to name C A1, so a line longer than 80 columns is not truncated
+ * the way an FTP upload with FIXRECFM 80 truncates it. The staged source is
+ * left in place; the listing is name LISTING A1.
+ *
+ * PLAIN is the default and links only PDPCLIB. NAPI also assembles GITCAPI
+ * and GITINFA, which must be on an accessed disk; they are not part of the
+ * base install.
+ *
+ * The MODULE stays on CMS: a binary cannot round trip through GETBFS.
+ */
+parse arg name path mode .
+upper = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ'
+lower = 'abcdefghijklmnopqrstuvwxyz'
+name = translate(name, upper, lower)
+mode = translate(mode, upper, lower)
+if name = '' | path = '' then do
+  say 'Usage: MKModule name path [NAPI|PLAIN]'
+  exit 4
+end
+if length(name) > 8 then do
+  say 'MKModule: name must be 8 characters or fewer'
+  exit 4
+end
+if mode = '' then mode = 'PLAIN'
+if mode \= 'NAPI' & mode \= 'PLAIN' then do
+  say 'MKModule: mode must be NAPI or PLAIN'
+  exit 4
+end
+address command
+'EXEC BFS2CMS' path name 'C A1'
+if rc \= 0 then do
+  say 'MKModule: staging failed RC' rc
+  exit rc
+end
+'EXEC CMSCLNK' name mode
+src = rc
+if src \= 0 then do
+  say 'MKModule: build failed RC' src 'listing' name 'LISTING A1'
+  exit src
+end
+say 'MKModule: built' name 'MODULE; listing' name 'LISTING A1'
+exit 0

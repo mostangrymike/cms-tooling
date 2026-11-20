@@ -29,6 +29,9 @@ disagrees with this page, this page wins. Last updated 2026-11-19.
 - CMS↔BFS ASCII text bridge (`cms-execs/CMS2BFS.EXEC`, `cms-execs/BFS2CMS.EXEC`)
   built on `OPENVM PUTBFS`/`GETBFS` with explicit `1047`↔`819` translation;
   round trips verified byte-exact.
+- One-command CMS build from BFS source (`cms-execs/MKMODULE.EXEC`): stage,
+  `CMSCLNK`, `GENMOD`, with RC propagation for staging, compile and assembly
+  failures.
 
 ## Target environment (verified 2026-11-19)
 
