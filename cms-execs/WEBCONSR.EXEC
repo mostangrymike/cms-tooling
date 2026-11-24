@@ -473,13 +473,10 @@ perf_collect: procedure expose cfg.
   q0=0; q1=0; q2=0; q3=0; dorm=0
   users=0; dialed=0; net=0
   spool_pct=0; page_pct=0
-  spool_t=0; spool_u=0; page_t=0; page_u=0
   parse value run_cmd('CP INDICATE LOAD') with rc '|' out
   call perf_parse_load out
   parse value run_cmd('CP QUERY USERS') with rc '|' uout
   call perf_parse_users uout
-  parse value run_cmd('CP QUERY ALLOC') with rc '|' aout
-  call perf_parse_alloc aout
   j = '{"ok":true,'
   j = j || '"avgproc":'avg','
   j = j || '"nproc":'nproc','
@@ -544,26 +541,4 @@ perf_parse_users: procedure expose users dialed net
       if datatype(strip(ne),'W') then net = strip(ne) + 0
     end
   end
-  return
-
-perf_parse_alloc: procedure expose spool_pct page_pct spool_t spool_u,
-  page_t page_u
-  parse arg out
-  spool_t=0; spool_u=0; page_t=0; page_u=0
-  do while out \= ''
-    parse var out line '0A'x out
-    u = translate(strip(line))
-    if pos('SPOOL', u) > 0 & pos('TOTAL=', u) > 0 then do
-      parse var u . 'TOTAL=' t 'INUSE=' iu 'AVAIL=' .
-      if datatype(t,'W') then spool_t = spool_t + t
-      if datatype(iu,'W') then spool_u = spool_u + iu
-    end
-    if pos('PAGE', u) > 0 & pos('TOTAL=', u) > 0 then do
-      parse var u . 'TOTAL=' t 'INUSE=' iu 'AVAIL=' .
-      if datatype(t,'W') then page_t = page_t + t
-      if datatype(iu,'W') then page_u = page_u + iu
-    end
-  end
-  if spool_t > 0 then spool_pct = format(spool_u * 100 / spool_t,,1)
-  if page_t > 0 then page_pct = format(page_u * 100 / page_t,,1)
   return
