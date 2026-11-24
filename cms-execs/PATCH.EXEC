@@ -1,0 +1,265 @@
+/* PATCH EXEC - apply context hunks to a CMS file.
+ *
+ * Usage: PATCH fn ft fm hunkfn hunkft hunkfm [(CHECK] [(FIRST] [(ALL]
+ *
+ * The hunk file holds blocks of lines:
+ *   -old line    must appear, in that order, in the target file
+ *   +new line    replaces the matched block
+ *
+ * Blank lines and lines beginning with * separate hunks and are ignored.
+ * Insertion is a replacement that repeats its anchor line:
+ *   -    rrc = result
+ *   +    rrc = 0
+ *
+ * Matching is exact after trailing blanks are stripped.  A hunk that
+ * matches more than once is an error unless (FIRST or (ALL is given, so
+ * a wrong edit cannot happen silently.
+ *
+ * Before writing, the target is copied to fn ft BAK (OLDDATE REPLACE) and
+ * the new text goes through fn PTCHTMP ft, which then replaces the target.
+ * EXECIO DISKW only appends on this CMS, so the temp file is erased first.
+ *
+ * Exit: 0 applied, 4 usage, 8 ambiguous, 12 no match, 20 bad input,
+ *       28 file not found, 40 write failed.
+ */
+parse arg tfn tft tfm hfn hft hfm opts
+if strip(tfn) = '' | strip(hfn) = '' then call usage
+opts = translate(opts)
+opts = translate(opts, ' ', '(')
+check = 0
+mode = 'ONE'
+do while strip(opts) \= ''
+  parse var opts w opts
+  if w = 'CHECK' then check = 1
+  if w = 'FIRST' then mode = 'FIRST'
+  if w = 'ALL' then mode = 'ALL'
+end
+
+/* read the target */
+n = 0
+do forever
+  'EXECIO 2000 DISKR' tfn tft tfm
+  erc = rc
+  q = queued()
+  if q = 0 then do
+    if erc \= 0 & n = 0 then do
+      say 'PATCH: cannot read' tfn tft tfm 'RC' erc
+      exit 28
+    end
+    leave
+  end
+  do i = 1 to q
+    parse pull line
+    n = n + 1
+    t.n = line
+  end
+  if q < 2000 then leave
+end
+'EXECIO 0 DISKR' tfn tft tfm '(FINIS'
+if n = 0 then do
+  say 'PATCH: target' tfn tft tfm 'is empty'
+  exit 20
+end
+
+/* read and group the hunks */
+h = 0
+state = ''
+bad = 0
+do forever
+  'EXECIO 2000 DISKR' hfn hft hfm
+  erc = rc
+  q = queued()
+  if q = 0 then do
+    if erc \= 0 & h = 0 then do
+      say 'PATCH: cannot read' hfn hft hfm 'RC' erc
+      exit 28
+    end
+    leave
+  end
+  do i = 1 to q
+    parse pull line
+    c = left(line, 1)
+    if c = '-' then do
+      if state = 'new' then state = ''
+      if state \= 'old' then do
+        h = h + 1
+        ho.h = 0
+        hn.h = 0
+        state = 'old'
+      end
+      c = ho.h + 1
+      ho.h = c
+      ho.h.c = strip(substr(line, 2), 'T')
+    end
+    else if c = '+' then do
+      if h = 0 then bad = 1
+      if h > 0 & state \= 'new' then do
+        if ho.h = 0 then bad = 1
+        state = 'new'
+      end
+      if h > 0 then do
+        c = hn.h + 1
+        hn.h = c
+        hn.h.c = strip(substr(line, 2), 'T')
+      end
+    end
+    else state = ''
+  end
+  if q < 2000 then leave
+end
+'EXECIO 0 DISKR' hfn hft hfm '(FINIS'
+if h = 0 then do
+  say 'PATCH: no hunks in' hfn hft hfm
+  exit 20
+end
+if bad then do
+  say 'PATCH: hunk file starts with + or has no - lines'
+  exit 20
+end
+do k = 1 to h
+  if ho.k = 0 then do
+    say 'PATCH: hunk' k 'has no - lines'
+    exit 20
+  end
+end
+
+/* locate every hunk */
+do p = 1 to n
+  startat.p = 0
+end
+do k = 1 to h
+  cnt = 0
+  first = 0
+  last = n - ho.k + 1
+  do p = 1 to last
+    if match(k, p) then do
+      cnt = cnt + 1
+      if first = 0 then first = p
+      if mode = 'ALL' then do
+        if startat.p \= 0 then signal collide
+        startat.p = k
+      end
+    end
+  end
+  if cnt = 0 then signal nomatch
+  if cnt > 1 & mode = 'ONE' then signal ambiguous
+  hitk.k = first
+  if mode \= 'ALL' then do
+    if startat.first \= 0 then signal collide
+    startat.first = k
+  end
+end
+
+/* build the new file */
+out = 0
+p = 1
+do while p <= n
+  k = startat.p
+  if k > 0 then do
+    do j = 1 to hn.k
+      out = out + 1
+      o.out = hn.k.j
+    end
+    p = p + ho.k
+  end
+  else do
+    out = out + 1
+    o.out = t.p
+    p = p + 1
+  end
+end
+
+if check then do
+  do k = 1 to h
+    say 'PATCH: hunk' k 'at line' hitk.k '(-' ho.k 'lines +' hn.k ')'
+  end
+  say 'PATCH: check only;' n 'records become' out 'in' tfn tft tfm
+  exit 0
+end
+
+'COPYFILE' tfn tft tfm tfn 'BAK' tfm '(REPLACE OLDDATE'
+if rc \= 0 then do
+  say 'PATCH: cannot make backup' tfn 'BAK' tfm 'RC' rc
+  exit 40
+end
+'SET CMSTYPE HT'
+'STATE' tfn 'PTCHTMP' tfm
+have = rc
+'SET CMSTYPE RT'
+if have = 0 then 'ERASE' tfn 'PTCHTMP' tfm
+done = 0
+do while done < out
+  take = out - done
+  if take > 1000 then take = 1000
+  do j = 1 to take
+    q = done + j
+    queue o.q
+  end
+  'EXECIO' take 'DISKW' tfn 'PTCHTMP' tfm
+  if rc \= 0 then do
+    say 'PATCH: write to' tfn 'PTCHTMP' tfm 'failed RC' rc
+    do j = 1 to queued()
+      parse pull
+    end
+    exit 40
+  end
+  done = done + take
+end
+'EXECIO 0 DISKW' tfn 'PTCHTMP' tfm '(FINIS'
+if rc \= 0 then do
+  say 'PATCH: close of temp failed RC' rc
+  exit 40
+end
+'SET CMSTYPE HT'
+'STATE' tfn 'PTCHTMP' tfm
+have = rc
+'SET CMSTYPE RT'
+if have \= 0 then do
+  say 'PATCH: temp file missing;' tfn tft tfm 'unchanged'
+  exit 40
+end
+'COPYFILE' tfn 'PTCHTMP' tfm tfn tft tfm '(REPLACE'
+if rc \= 0 then do
+  say 'PATCH: replace failed RC' rc '; target unchanged, temp kept'
+  exit 40
+end
+'SET CMSTYPE HT'
+'STATE' tfn 'PTCHTMP' tfm
+have = rc
+'SET CMSTYPE RT'
+if have = 0 then 'ERASE' tfn 'PTCHTMP' tfm
+say 'PATCH:' h 'hunk(s) applied to' tfn tft tfm ';' n 'records ->' out
+say 'PATCH: backup is' tfn 'BAK' tfm
+exit 0
+
+usage:
+  say 'Usage: PATCH fn ft fm hunkfn hunkft hunkfm [(CHECK] [(FIRST] [(ALL]'
+  say 'Hunks: -old line then +new line; * and blank lines separate.'
+  exit 4
+
+nomatch:
+  say 'PATCH: hunk' k 'not found: [' trunk(ho.k.1) ']'
+  exit 12
+
+ambiguous:
+  say 'PATCH: hunk' k 'matches' cnt 'times: [' trunk(ho.k.1) ']'
+  say 'PATCH: nothing written; add context or use (FIRST or (ALL'
+  exit 8
+
+collide:
+  say 'PATCH: hunks overlap at line' p
+  exit 8
+
+/* match: does old block k fit at line p of the target? */
+match: procedure expose t. ho.
+parse arg k, p
+do j = 1 to ho.k
+  q = p + j - 1
+  if strip(t.q, 'T') \= strip(ho.k.j, 'T') then return 0
+end
+return 1
+
+trunk: procedure
+parse arg s
+if length(s) > 40 then return left(s, 37) '...'
+return s

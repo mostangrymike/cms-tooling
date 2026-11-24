@@ -1,0 +1,140 @@
+/* GREP EXEC - search file contents on any accessed CMS minidisk.
+ *
+ * Usage: GREP pattern [fn [ft [fm]]] [options]
+ *        fn, ft, fm accept * and ?; defaults are * * *
+ *        (fm defaults to *, i.e. every accessed minidisk)
+ *
+ * Options:
+ *   (I          case-insensitive
+ *   (LIMIT n    stop after n matching lines (default 100)
+ *   (FILES      print only the file IDs that contain a match
+ *
+ * Output: one line per hit, "fn ft fm line: text".
+ *
+ * Exit codes: 0 hits, 1 no hits, 20 error.
+ *
+ * FIND answers "who has a file called X"; this answers "which file
+ * contains X".  OE /bin/grep cannot: it sees only BFS files, so every
+ * candidate would have to be copied out and translated first.
+ */
+parse arg rest
+if strip(rest) = '' then call usage
+parse var rest pat rest
+if pat = '' then call usage
+fn = '*'
+ft = '*'
+fm = '*'
+posn = 0
+caseless = 0
+filesonly = 0
+limit = 100
+do while strip(rest) \= ''
+  parse var rest w rest
+  w = strip(w)
+  if left(w, 1) = '(' then do
+    o = translate(w, ' ', '(')
+    o = strip(o, 'B', ')')
+    if o = 'LIMIT' then do
+      parse var rest lim rest
+      lim = translate(lim, ' ', '(')
+      lim = strip(lim, 'B', ')')
+      if datatype(lim, 'W') then limit = lim
+      iterate
+    end
+    if left(o, 5) = 'LIMIT' then do
+      lim = substr(o, 6)
+      if datatype(lim, 'W') then limit = lim
+      iterate
+    end
+    if o = 'I' then caseless = 1
+    if o = 'FILES' then filesonly = 1
+    iterate
+  end
+  posn = posn + 1
+  if posn = 1 then fn = translate(w)
+  if posn = 2 then ft = translate(w)
+  if posn = 3 then fm = translate(w)
+end
+
+files = 0
+hits = 0
+errors = 0
+stopped = 0
+'PIPE CMS LISTFILE' fn ft fm '| stem FL.'
+if rc \= 0 then do
+  say 'GREP: LISTFILE failed RC' rc
+  exit 20
+end
+do i = 1 to FL.0
+  if stopped then leave
+  line = FL.i
+  parse var line f t m .
+  if f = '' then iterate
+  files = files + 1
+  call scan f t m
+end
+if files = 0 then do
+  say 'GREP: no files match' fn ft fm
+  exit 20
+end
+if errors > 0 & hits = 0 then exit 20
+if hits = 0 then exit 1
+exit 0
+
+usage:
+  say 'Usage: GREP pattern [fn [ft [fm]]] [(I] [(LIMIT n] [(FILES]'
+  say 'Example: GREP MAXCONN * EXEC A'
+  exit 20
+
+/* scan: read one file in 2000-record chunks and report matching records */
+scan: procedure expose pat caseless filesonly limit hits errors stopped
+parse arg f t m
+n = 0
+do forever
+  'EXECIO 2000 DISKR' f t m
+  erc = rc
+  q = queued()
+  if erc \= 0 & q = 0 then do
+    say 'GREP: cannot read' f t m 'RC' erc
+    errors = errors + 1
+    return
+  end
+  if q = 0 then return
+  do i = 1 to q
+    parse pull line
+    n = n + 1
+    if caseless then do
+      hay = translate(line)
+      needle = translate(pat)
+    end
+    else do
+      hay = line
+      needle = pat
+    end
+    if pos(needle, hay) > 0 then do
+      hits = hits + 1
+      if filesonly then do
+        say left(f, 8) left(t, 8) left(m, 2)
+        call drain
+        'EXECIO 0 DISKR' f t m '(FINIS'
+        return
+      end
+      say left(f, 8) left(t, 8) left(m, 2) right(n, 5)':' line
+      if hits >= limit then do
+        say 'GREP: limit' limit 'reached'
+        stopped = 1
+        call drain
+        'EXECIO 0 DISKR' f t m '(FINIS'
+        return
+      end
+    end
+  end
+  if q < 2000 then return
+end
+
+/* drain: empty the program stack so CMS never runs leftover records */
+drain: procedure
+do while queued() > 0
+  parse pull
+end
+return

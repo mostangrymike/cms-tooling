@@ -23,6 +23,8 @@ import tempfile
 SUPPORT_FILES = (
     "AGENTS.md", ".gitignore", "README.md", "TELNET-DRIVER.md", "BRIDGE.md",
     "ci/cms-tooling.yml",
+    "cms-execs/BFS2CMS.EXEC", "cms-execs/CMS2BFS.EXEC", "cms-execs/FIND.EXEC",
+    "cms-execs/GREP.EXEC", "cms-execs/MKMODULE.EXEC", "cms-execs/PATCH.EXEC",
 )
 
 #: Python files the distribution deliberately exposes.  Local modules they
@@ -39,6 +41,7 @@ ENTRY_POINTS = (
     "test_cms_mdisk_inventory.py", "test_cms_mdisk_lifecycle.py",
     "test_cms_mdisk_receipts.py", "test_cms_folder.py",
     "test_cms_profiles.py", "test_cms_profiles_offline_end2end.py",
+    "test_cms_execs.py",
     "test_cms_telnet_profile.py",
     "test_github_tls_bridge.py",
 )

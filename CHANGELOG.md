@@ -4,6 +4,22 @@ Newest first. What landed, not proof claims. Detailed work log is `NOTES.md`.
 
 ## Unreleased
 
+- Add `cms-execs/PATCH.EXEC`: hunk-based in-place edit for CMS files
+  (`-old`/`+new` blocks, exact match after trailing-blank strip, backup to
+  `fn BAK fm`, temp `fn PTCHTMP fm` then `COPYFILE (REPLACE)`). Refuses an
+  ambiguous match (RC 8) and writes nothing on any mismatch (RC 12).
+  `(CHECK` dry-runs; `(FIRST`/`(ALL` opt into multiple matches.
+- Add `cms-execs/GREP.EXEC`: search file contents on any accessed minidisk,
+  `(I`, `(LIMIT n`, `(FILES`; RC 1 when nothing matches.
+- Add `docs/TOOLS.md`: which layer (CMS native, OpenExtensions, host FTP) to
+  use for which job, the shared exit-code contract, and the CMS behaviours
+  that break Unix-shaped tools (`EXECIO DISKW` always appends, `stem.(expr)`
+  is a routine call, `fn ft BAK` is not a filemode, writes invisible until
+  `FINIS`).
+- Add `test_cms_execs.py`: offline guards on the shipped REXX sources (80
+  columns, no tabs, no indexed-stem expressions, writers close their files).
+  `cms-execs/*.EXEC` now ship in the build bundle.
+
 - Add `cms-execs/MKMODULE.EXEC`: stage a BFS C source onto `A`, run the site
   `CMSCLNK`, report the RC, leave `name C A1` and `name LISTING A1`.
   `PLAIN` default; verified build and run of a 2648-record source.

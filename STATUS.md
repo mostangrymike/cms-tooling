@@ -1,16 +1,16 @@
 # Status
 
 **Canonical current-state file for `cms-tooling`.** If any other document
-disagrees with this page, this page wins. Last updated 2026-11-19.
+disagrees with this page, this page wins. Last updated 2026-11-23.
 
 ## Right now
 
 | Field | Value |
 |---|---|
 | Branch | `main` |
-| Latest commit | `d77b9c4` — register profile test modules as build entry points |
+| Latest commit | `c4f40b0` — index minidisks and add `FIND` |
 | Build | `python3 -B build_cms_tooling.py` (offline, no CMS) |
-| Tests | 116 tests, 0 failures/errors; Python 3.12 and 3.14 |
+| Tests | 125 tests, 0 failures/errors; Python 3.12 and 3.14 |
 | CI | `cms tooling offline build` and `Offline tests (profiles)` — **green** |
 
 ## What works
@@ -32,6 +32,11 @@ disagrees with this page, this page wins. Last updated 2026-11-19.
 - One-command CMS build from BFS source (`cms-execs/MKMODULE.EXEC`): stage,
   `CMSCLNK`, `GENMOD`, with RC propagation for staging, compile and assembly
   failures.
+- Native in-place edit and search, verified on the guest 2026-11-23:
+  `PATCH fn ft fm hunkfn hunkft hunkfm` (backup to `fn BAK fm`, refuses an
+  ambiguous match, nothing written on a mismatch) and `GREP pattern
+  [fn [ft [fm]]]`. Details and the exit-code contract:
+  [`docs/TOOLS.md`](docs/TOOLS.md).
 
 ## Target environment (verified 2026-11-19)
 
@@ -49,6 +54,14 @@ disagrees with this page, this page wins. Last updated 2026-11-19.
 Details: [`docs/OE_BFS.md`](docs/OE_BFS.md),
 [`docs/TLS_ASSESSMENT.md`](docs/TLS_ASSESSMENT.md).
 
+## Filename database (`FIND`)
+
+`MAINT 191` (A) carries `FINDBASE DATA A` — 117,397 records covering 267 of the
+341 MDISK definitions in `CANDFIN DIRECT` — and `FIND EXEC A`, which searches
+`filename[.filetype]` with `*`/`?` wildcards. Rebuild with
+`cms_find_index.py --directory <source> --state <json> --database <file>`, then
+`--install`. Details: [`docs/FIND_DB.md`](docs/FIND_DB.md).
+
 ## What is not done
 
 - No live production rollout; planner and lifecycle are offline/read-only.
@@ -57,6 +70,20 @@ Details: [`docs/OE_BFS.md`](docs/OE_BFS.md),
   → delete) beyond profile resolution tests.
 - No CMSToBFS bridge: no file-format/encoding conversion, no `make`/`c89`
   driver that emits a CMS MODULE.
+
+## Protected CMS files (standing rule, 2026-11-22)
+
+Never rename, erase, replace, or move these without a new explicit instruction
+from the operator naming the exact file:
+
+| Userid / disk | File | Role |
+|---|---|---|
+| `MAINT 191` (A) | `PROFILE EXEC` | MAINT logon profile (absent since 2026-11-22 erase; protected if recreated) |
+| `MAINT 191` (A) | `RESTORE EXEC` | restore utility |
+| `AUTOLOG1 191` (A) | `PROFILE EXEC` | autolog profile (218 recs, 9/14/26) |
+
+`AUTOLOG1 191 PROFILE EXECSAV` (217 recs, 9/14/26 14:07:53) is the rollback
+copy for that profile.
 
 ## Read next
 

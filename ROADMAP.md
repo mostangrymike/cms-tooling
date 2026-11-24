@@ -63,6 +63,11 @@ Verified environment facts are in `docs/OE_BFS.md` and
 - **Agent harness.** Shell loop that uses `cms` for build and publish, with an
   append-only audit log. Never run generated code in the agent guest; use a
   separate userid with read-only links and CPU/storage caps.
+- **Native edit and search.** Done: `cms-execs/PATCH.EXEC` applies
+  `-old`/`+new` hunks with a `fn BAK fm` backup and refuses ambiguity;
+  `cms-execs/GREP.EXEC` searches file contents across accessed minidisks.
+  Contract and gotchas: `docs/TOOLS.md`. Remaining: an RC/quiet wrapper so an
+  agent can call either from one line without parsing prose.
 - **Missing utilities** in the guest: `patch`, `jq`, `curl`, `base64`,
-  `sha256sum`, `timeout`. Decide per tool: small C implementation, or a shell
-  substitute (`diff` + `ed` for `patch`).
+  `sha256sum`, `timeout`. `patch` is now served natively by `PATCH.EXEC`;
+  decide the rest per tool (small C implementation or a shell substitute).
