@@ -32,6 +32,7 @@ ENTRY_POINTS = (
     "cms_credentials.py", "github_tls_bridge.py",
     "cms_mdisk_plan.py", "cms_mdisk_directory.py", "cms_mdisk_cp.py",
     "cms_mdisk_inventory.py", "cms_mdisk_lifecycle.py", "cms_mdisk_receipts.py",
+    "cms_find_index.py",
     "test_cms_build.py", "test_cms_telnet_driver.py",
     "test_cms_ftptransfer.py", "test_cms_mdisk_plan.py",
     "test_cms_mdisk_directory.py", "test_cms_mdisk_cp.py",

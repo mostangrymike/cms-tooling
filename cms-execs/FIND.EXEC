@@ -1,0 +1,68 @@
+/* FIND EXEC - search the minidisk filename database (FINDBASE DATA A)   */
+/*                                                                       */
+/* Usage: FIND filename[.filetype]                                       */
+/*        Wildcards: * (any string) and ? (one character).               */
+/*        Examples:  FIND PROFILE                                        */
+/*                   FIND *.EXEC                                         */
+/*                   FIND M*.*                                           */
+/*                                                                       */
+/* Database: one record per file found on every attachable minidisk      */
+/* defined in the CP directory:                                          */
+/*   userid vdev filename filetype filemode records date                 */
+/* Rebuild it with the directory scan (see docs/FIND_DB.md).             */
+Address Command
+Parse Arg q .
+q = Strip(q)
+If q = '' Then Do
+  Say 'FIND: usage: FIND filename[.filetype]   (* and ? allowed)'
+  Say 'FIND: database is FINDBASE DATA A'
+  Exit 24
+End
+Parse Var q fnpat '.' ftpat .
+If fnpat = '' Then fnpat = '*'
+If ftpat = '' Then ftpat = '*'
+fnpat = Translate(fnpat)
+ftpat = Translate(ftpat)
+hits = 0
+seen = 0
+Do Forever
+  'EXECIO 2000 DISKR FINDBASE DATA A'
+  n = Queued()
+  If n = 0 Then Leave
+  Do i = 1 To n
+    Parse Pull line
+    seen = seen + 1
+    Parse Var line u v f t fm recs .
+    If u = '' Then Iterate
+    If Match(fnpat, f) & Match(ftpat, t) Then Do
+      hits = hits + 1
+      Say Left(u, 8) Left(v, 6) Left(f, 8) Left(t, 8) Left(fm, 2) recs
+    End
+  End
+  If n < 2000 Then Leave
+End
+'EXECIO 0 DISKR FINDBASE DATA A (FINIS'
+If seen = 0 Then Do
+  Say 'FIND: FINDBASE DATA A is empty or missing.'
+  Exit 20
+End
+Say hits 'file(s) found in' seen 'database records'
+Exit 0
+
+/* Match: wildcard match of PAT against STR (* and ? supported)          */
+Match: Procedure
+Parse Arg pat, str
+If pat = '' Then Return (str = '')
+c = Left(pat, 1)
+rest = Substr(pat, 2)
+If c = '*' Then Do
+  If rest = '' Then Return 1
+  Do j = 1 To Length(str) + 1
+    If Match(rest, Substr(str, j)) Then Return 1
+  End
+  Return 0
+End
+If str = '' Then Return 0
+If c = '?' Then Return Match(rest, Substr(str, 2))
+If c \= Left(str, 1) Then Return 0
+Return Match(rest, Substr(str, 2))

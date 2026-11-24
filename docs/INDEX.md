@@ -37,3 +37,4 @@ retire.
 |---|---|---|
 | `OE_BFS.md` | current | OpenExtensions/BFS inventory, gaps, logon mount. |
 | `TLS_ASSESSMENT.md` | current | Outbound TLS ceiling and network reach of the 6.3 guest. |
+| `FIND_DB.md` | current | Minidisk filename database and the `FIND` command on MAINT's A disk. |
