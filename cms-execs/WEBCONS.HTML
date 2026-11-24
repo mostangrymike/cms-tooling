@@ -28,10 +28,16 @@ commands travel in cleartext on the network.</div></header>
  <div id="loginMsg" class="warn"></div>
 </div>
 <div id="app" style="display:none">
+ <div class="row" style="justify-content:space-between;align-items:center">
+  <strong>z/VM Performance</strong>
+  <span><span id="perfTs" class="warn"></span>
+  <button onclick="logout()">Log out</button></span>
+ </div>
+ <div id="dash" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:10px;margin:10px 0"></div>
+ <svg id="cpuChart" width="100%" height="120" style="background:#0c0c0c;border:1px solid #333;border-radius:4px;margin-bottom:12px"></svg>
  <div class="row">
   <input id="cmd" size="72" placeholder="QUERY USERID" spellcheck="false">
   <button onclick="runCmd()">Run</button>
-  <button onclick="logout()">Log out</button>
  </div>
  <div class="row warn">Allowlisted read-only commands by default. Output
   capped. All commands audited.</div>
@@ -77,4 +83,57 @@ async function logout() { await api('/api/logout',{}); location.reload(); }
 document.getElementById('cmd').addEventListener('keydown', e => {
   if (e.key === 'Enter') runCmd();
 });
+
+let cpuHist=[];
+async function pollPerf(){
+  try{
+    const r=await fetch('/api/perf',{credentials:'same-origin'});
+    const j=await r.json();
+    if(!j.ok) return;
+    renderPerf(j);
+  }catch(e){}
+}
+function card(title,val,sub){
+  return `<div style="background:#181818;border:1px solid #333;border-radius:6px;padding:10px">
+  <div style="color:#bbb;font-size:12px">${title}</div>
+  <div style="font-size:28px;font-weight:600">${val}</div>
+  <div style="color:#888;font-size:12px">${sub||''}</div></div>`;
+}
+function bar(label,pct,color){
+  pct=Math.max(0,Math.min(100,Number(pct)||0));
+  return `<div style="margin:6px 0"><div style="font-size:12px;color:#bbb">${label} ${pct}%</div>
+  <div style="background:#333;border-radius:4px;height:10px"><div style="width:${pct}%;height:10px;border-radius:4px;background:${color}"></div></div></div>`;
+}
+function renderPerf(j){
+  document.getElementById('perfTs').textContent=new Date().toLocaleTimeString();
+  cpuHist.push(Number(j.avgproc)||0); if(cpuHist.length>60) cpuHist.shift();
+  const cards=[
+    card('CPU Avg', j.avgproc+'%', j.nproc+' processor(s)'),
+    card('Users', j.users, j.dialed+' dialed, '+j.net+' net'),
+    card('Paging', j.paging+'/s', 'MDC hit '+j.mdchit+'%'),
+    card('Queues', 'Q0:'+j.q0+' Q1:'+j.q1, 'Q2:'+j.q2+' Q3:'+j.q3+' Dorm:'+j.dormant)
+  ].join('');
+  const bars=bar('Spool used', j.spoolpct, '#4a9eff')+bar('Page used', j.pagepct, '#f0c36a');
+  document.getElementById('dash').innerHTML=cards+`<div style="background:#181818;border:1px solid #333;border-radius:6px;padding:10px">${bars}</div>`;
+  drawCpu();
+}
+function drawCpu(){
+  const svg=document.getElementById('cpuChart');
+  const w=svg.clientWidth||600,h=120,pad=8;
+  const max=100;
+  let pts='';
+  for(let i=0;i<cpuHist.length;i++){
+    const x=pad+(i/Math.max(1,cpuHist.length-1))*(w-2*pad);
+    const y=h-pad-(cpuHist[i]/max)*(h-2*pad);
+    pts+=`${x},${y} `;
+  }
+  const last=cpuHist.length?cpuHist[cpuHist.length-1]:0;
+  svg.innerHTML=`<text x="8" y="18" fill="#bbb" font-size="12">CPU % (last ${cpuHist.length}s)</text>
+  <text x="${w-8}" y="18" fill="#8fd18f" font-size="12" text-anchor="end">${last}%</text>
+  <line x1="${pad}" y1="${h-pad}" x2="${w-pad}" y2="${h-pad}" stroke="#333"/>
+  <line x1="${pad}" y1="${pad}" x2="${w-pad}" y2="${pad}" stroke="#222"/>
+  <polyline fill="none" stroke="#8fd18f" stroke-width="2" points="${pts}"/>`;
+}
+const _login=login;
+login=async function(){ await _login(); if(CSRF){ pollPerf(); if(window._perfTimer) clearInterval(window._perfTimer); window._perfTimer=setInterval(pollPerf,5000); } };
 </script></body></html>
