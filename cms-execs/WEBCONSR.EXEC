@@ -5,8 +5,12 @@
 /* Default config: WEBCON CFG A                                           */
 /*                                                                        */
 /* Exit: 0 normal stop, 20 socket/config failure.                         */
-say 'WEBCONSR: start'
 parse arg cfn cft cfm .
+if translate(cfn) = 'HASH' then do
+  say pass_hash(cft)
+  exit 0
+end
+say 'WEBCONSR: start'
 if cfn = '' then cfn = 'WEBCON'
 if cft = '' then cft = 'CFG'
 if cfm = '' then cfm = 'A'
@@ -235,19 +239,66 @@ sess_del: procedure expose sess.
 
 api_login: procedure expose cfg. sess.
   parse arg cs, body
+  if cfg.lock_until > 0 & time('S') < cfg.lock_until then do
+    call audit 'AUTHLOCK' ''
+    call serve_json cs, 403, '{"ok":false,"error":"locked out"}'
+    return
+  end
   u = json_str(body, 'user')
-  p = json_str(body, 'pass')
-  if u \= cfg.userid | p \= cfg.pass then do
+  pw = json_str(body, 'pass')
+  ok = 0
+  if u = cfg.userid then ok = pass_ok(pw)
+  if \ok then do
+    cfg.fail_n = cfg.fail_n + 1
+    if cfg.fail_n >= cfg.max_fail then do
+      cfg.lock_until = time('S') + cfg.lockout_sec
+      call audit 'AUTHLOCK' u
+    end
     call audit 'AUTHFAIL' u
     call serve_json cs, 401, '{"ok":false,"error":"bad credentials"}'
     return
   end
+  cfg.fail_n = 0
+  cfg.lock_until = 0
+  cfg.audit_n = 0
   parse value sess_new() with tok ctok
   call audit 'AUTHOK' u
   extra = 'Set-Cookie: webcons=' || tok ||,
           '; HttpOnly; SameSite=Strict' || '0D25'x
   call serve_json cs, 200, '{"ok":true,"csrf":"'ctok'"}', extra
   return
+
+pass_ok: procedure expose cfg.
+  parse arg pw
+  if cfg.passhash \= '' then
+    return pass_hash(pw) = translate(strip(cfg.passhash))
+  return pw = cfg.pass
+
+pass_hash: procedure
+  /* FNV-1a 32-bit over EBCDIC bytes; not cryptographic. */
+  parse arg s
+  numeric digits 20
+  h = 2166136261
+  do i = 1 to length(s)
+    b = c2d(substr(s, i, 1))
+    h = fnv_xor_byte(h, b)
+    h = h * 16777619
+    h = h // 4294967296
+  end
+  return 'FNV1A:' || d2x(h, 8)
+
+fnv_xor_byte: procedure
+  parse arg h, b
+  numeric digits 20
+  low = h // 256
+  hi = h % 256
+  r = 0; p = 1; a = low; bb = b
+  do 8
+    ba = a // 2; b2 = bb // 2
+    if ba \== b2 then r = r + p
+    a = a % 2; bb = bb % 2; p = p * 2
+  end
+  return hi * 256 + r
 
 api_logout: procedure expose sess.
   parse arg cs, tok
@@ -273,6 +324,17 @@ api_cmd: procedure expose cfg. sess.
   cmd = strip(cmd)
   if cmd = '' then do
     call serve_json cs, 400, '{"ok":false,"error":"empty command"}'
+    return
+  end
+  if length(cmd) > 200 then do
+    call serve_json cs, 400, '{"ok":false,"error":"command too long"}'
+    return
+  end
+  if pos('|',cmd)>0 | pos(';',cmd)>0 | pos('&',cmd)>0 |,
+     pos('<',cmd)>0 | pos('>',cmd)>0 | pos('"',cmd)>0 |,
+     pos("'",cmd)>0 | pos('60'x,cmd)>0 then do
+    call audit 'DENYCHARS' cmd
+    call serve_json cs, 403, '{"ok":false,"error":"bad characters"}'
     return
   end
   if \cmd_allowed(cmd) then do
@@ -397,14 +459,21 @@ cfg_load: procedure expose cfg.
   cfg.bind = 'INADDR_ANY'
   cfg.userid = 'webuser'
   cfg.pass = 'changeme'
+  cfg.passhash = ''
   cfg.session_ttl = 1800
   cfg.max_body = 4096
   cfg.max_out = 16384
+  cfg.max_fail = 5
+  cfg.lockout_sec = 300
+  cfg.audit_max = 2000
   cfg.logfile = 'WEBCONS LOG A'
   cfg.uifile = 'WEBCONS HTML A'
   cfg.auditfile = 'WEBCONS AUDIT A'
   cfg.allow.0 = 0
   cfg.deny.0 = 0
+  cfg.fail_n = 0
+  cfg.lock_until = 0
+  cfg.audit_n = 0
   'EXECIO * DISKR' fn ft fm '(FINIS STEM C.'
   if rc \= 0 then do
     say 'WEBCONSRV: config not found, using defaults'
@@ -421,10 +490,13 @@ cfg_load: procedure expose cfg.
       when key = 'BIND'        then cfg.bind = rest
       when key = 'USERID'      then cfg.userid = rest
       when key = 'PASS'        then cfg.pass = rest
-      when key = 'PASSHASH'    then cfg.pass = rest
+      when key = 'PASSHASH'    then cfg.passhash = rest
       when key = 'SESSION_TTL' then cfg.session_ttl = rest
       when key = 'MAX_BODY'    then cfg.max_body = rest
       when key = 'MAX_OUT'     then cfg.max_out = rest
+      when key = 'MAX_FAIL'    then cfg.max_fail = rest
+      when key = 'LOCKOUT_SEC' then cfg.lockout_sec = rest
+      when key = 'AUDIT_MAX'   then cfg.audit_max = rest
       when key = 'LOGFILE'     then cfg.logfile = rest
       when key = 'UIFILE'      then cfg.uifile = rest
       when key = 'AUDITFILE'   then cfg.auditfile = rest
@@ -449,6 +521,12 @@ audit: procedure expose cfg.
   parse arg kind, msg
   parse var cfg.auditfile fn ft fm .
   if fn = '' then return
+  cfg.audit_n = cfg.audit_n + 1
+  if cfg.audit_max > 0 & cfg.audit_n >= cfg.audit_max then do
+    'COPYFILE' fn ft fm fn 'AUDITOLD' fm '(REPLACE OLDDATE'
+    'ERASE' fn ft fm
+    cfg.audit_n = 0
+  end
   line = date('S') time() userid() kind msg
   push line
   'EXECIO 1 DISKW' fn ft fm '(FINIS'

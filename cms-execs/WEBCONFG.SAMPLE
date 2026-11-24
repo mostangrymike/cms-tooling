@@ -1,14 +1,20 @@
-* WEBCONCFG SAMPLE - copy to WEBCON CFG A and edit on the guest.
-* This file is parsed as KEY VALUE lines. '*' and blank lines ignored.
-* Do not commit real passwords or tokens.
+* WEBCON CFG - copy to WEBCON CFG A and edit on the guest.
+* Parsed as KEY VALUE lines. '*' and blank lines ignored.
+* Do not commit real passwords.
+*
+* Auth: set PASSHASH (preferred) or PASS (plaintext, isolated LAN only).
+* PASSHASH format: FNV1A:<8-hex> over CMS EBCDIC bytes. Not cryptographic.
+* Generate on CMS: WEBCONSR HASH <password>
 PORT 8080
 BIND INADDR_ANY
 USERID webuser
-PASSHASH replace-with-sha256-hex
+PASSHASH FNV1A:00000000
 SESSION_TTL 1800
 MAX_BODY 4096
 MAX_OUT 16384
-CMD_TIMEOUT 30
+MAX_FAIL 5
+LOCKOUT_SEC 300
+AUDIT_MAX 2000
 LOGFILE WEBCONS LOG A
 UIFILE WEBCONS HTML A
 AUDITFILE WEBCONS AUDIT A
