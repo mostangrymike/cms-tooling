@@ -4,6 +4,17 @@ Newest first. What landed, not proof claims. Detailed work log is `NOTES.md`.
 
 ## Unreleased
 
+- DirMaint removal phase 2: `AUTOLOG1 191 PROFILE EXEC` now comments out
+  `Call Dirm` and sets `rrc = 0` (220 records). `PROFILE EXECP2` keeps the
+  pre-change content; the live file was downloaded and compared byte-for-byte
+  with the staged payload.
+- DirMaint removal phase 3–4: built `CANDNODM DIRECT` on `MAINT 02CC` from
+  `CANDFIN DIRECT`, removing the `DIRMAINT`, `DIRMSAT`, `DATAMOVE` and
+  `6VMDIR30` entries. `DIRECTXA CANDNODM DIRECT C (EDIT` compiles with no
+  diagnostics. Phase 4 activated on explicit approval: `EOJ DIRECTORY UPDATED AND ON LINE`, `HCPDIR494I User directory occupies 55 disk pages`; removed IDs now answer `HCPLNM053E ... not in CP directory`.
+- Add `docs/DIRMAINT_REMOVAL.md`: phases, exact commands, rollback, and the
+  fact that `DIRECTXA` is a module on `PMAINT 551`, not a CP command here.
+
 - Add `cms-execs/PATCH.EXEC`: hunk-based in-place edit for CMS files
   (`-old`/`+new` blocks, exact match after trailing-blank strip, backup to
   `fn BAK fm`, temp `fn PTCHTMP fm` then `COPYFILE (REPLACE)`). Refuses an

@@ -39,3 +39,4 @@ retire.
 | `TLS_ASSESSMENT.md` | current | Outbound TLS ceiling and network reach of the 6.3 guest. |
 | `FIND_DB.md` | current | Minidisk filename database and the `FIND` command on MAINT's A disk. |
 | `TOOLS.md` | current | Native CMS tooling: `PATCH`, `GREP`, exit codes, and the CMS behaviours that break Unix-shaped tools. |
+| `DIRMAINT_REMOVAL.md` | current | DirMaint removal phases, candidate directory, and the `DIRECTXA` procedure. |

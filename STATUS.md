@@ -62,6 +62,22 @@ Details: [`docs/OE_BFS.md`](docs/OE_BFS.md),
 `cms_find_index.py --directory <source> --state <json> --database <file>`, then
 `--install`. Details: [`docs/FIND_DB.md`](docs/FIND_DB.md).
 
+## DirMaint removal
+
+Phases 1–3 are complete; activation is held.
+
+| Phase | State |
+|---|---|
+| 1 — audit | done |
+| 2 — stop `AUTOLOG1` autologging DirMaint/DIRMSAT | **applied 2026-11-23**; live profile byte-identical to the staged payload |
+| 3 — candidate directory without DirMaint | **validated 2026-11-23**: `CANDNODM DIRECT C` on `MAINT 02CC`, 4023 recs, `DIRECTXA ... (EDIT` clean |
+| 4 — activate candidate | **applied 2026-11-23** — `EOJ DIRECTORY UPDATED AND ON LINE`, 55 disk pages; removed IDs now `not in CP directory` |
+
+Candidate removes `DIRMAINT`, `DIRMSAT`, `DATAMOVE`, `6VMDIR30`; no other entry
+references them. `CANDFIN DIRECT` is unchanged and is the rollback source.
+`DIRECTXA` is not a CP command here — the module is on `PMAINT 551`, which must
+be accessed. Details: [`docs/DIRMAINT_REMOVAL.md`](docs/DIRMAINT_REMOVAL.md).
+
 ## What is not done
 
 - No live production rollout; planner and lifecycle are offline/read-only.
@@ -70,6 +86,7 @@ Details: [`docs/OE_BFS.md`](docs/OE_BFS.md),
   → delete) beyond profile resolution tests.
 - No CMSToBFS bridge: no file-format/encoding conversion, no `make`/`c89`
   driver that emits a CMS MODULE.
+- DirMaint removal is complete through phase 4; `CANDFIN DIRECT` remains on 02CC as the rollback source.
 
 ## Protected CMS files (standing rule, 2026-11-22)
 
@@ -80,7 +97,7 @@ from the operator naming the exact file:
 |---|---|---|
 | `MAINT 191` (A) | `PROFILE EXEC` | MAINT logon profile (absent since 2026-11-22 erase; protected if recreated) |
 | `MAINT 191` (A) | `RESTORE EXEC` | restore utility |
-| `AUTOLOG1 191` (A) | `PROFILE EXEC` | autolog profile (218 recs, 9/14/26) |
+| `AUTOLOG1 191` (A) | `PROFILE EXEC` | autolog profile (220 recs, 11/23/26; DirMaint autolog disabled) |
 
 `AUTOLOG1 191 PROFILE EXECSAV` (217 recs, 9/14/26 14:07:53) is the rollback
 copy for that profile.
