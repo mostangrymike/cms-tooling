@@ -1,0 +1,436 @@
+/* WEBCONSRV EXEC - CMS web console HTTP/1.0 server (M0/M1 skeleton).   */
+/* Plain HTTP, no SSL. RXSOCKET on CMS. Read-only allowlist by default.  */
+/*                                                                        */
+/* Usage: WEBCONSRV [configfn configft configfm]                          */
+/* Default config: WEBCON CFG A                                           */
+/*                                                                        */
+/* Exit: 0 normal stop, 20 socket/config failure.                         */
+say 'WEBCONSR: start'
+parse arg cfn cft cfm .
+if cfn = '' then cfn = 'WEBCON'
+if cft = '' then cft = 'CFG'
+if cfm = '' then cfm = 'A'
+call cfg_load cfn cft cfm
+call audit 'START' 'port=' cfg.port
+say 'WEBCONSR: audit ok'
+parse value socket('Initialize','WEBCONS') with rc .
+if rc \= 0 then call die 'Initialize' rc
+parse value socket('Socket') with rc lsid .
+if rc \= 0 then call die 'Socket' rc
+parse value socket('Bind', lsid, 'AF_INET' cfg.port 'INADDR_ANY'),
+  with rc .
+if rc \= 0 then call die 'Bind' rc
+parse value socket('Listen', lsid, 5) with rc .
+if rc \= 0 then call die 'Listen' rc
+say 'WEBCONSR: listening on port' cfg.port
+
+do forever
+  parse value socket('Accept', lsid) with rc cs .
+  if rc \= 0 then do
+    call audit 'ACCEPTERR' rc
+    iterate
+  end
+  call handle cs
+  call socket 'Close', cs
+end
+/* not reached */
+call socket 'Close', lsid
+call socket 'Terminate'
+exit 0
+
+die: procedure expose cfg.
+  parse arg what rc
+  say 'WEBCONSRV: fail' what 'rc=' rc
+  call socket 'Terminate'
+  exit 20
+
+/* Handle one HTTP connection. */
+handle: procedure expose cfg. sess.
+  parse arg cs
+  req = http_read(cs)
+  if req = '' then return
+  p = pos('0D25'x||'0D25'x, req)
+  if p = 0 then return
+  hdrs = left(req, p - 1)
+  body = substr(req, p + 4)
+  parse var hdrs rline '0D25'x rest
+  parse var rline method path ver
+  method = strip(method)
+  path = strip(path)
+  call audit 'REQ' method path
+  if method = 'GET' & path = '/' then do
+    call serve_file cs, cfg.uifile, 'text/html; charset=us-ascii'
+    return
+  end
+  if method = 'GET' & path = '/api/status' then do
+    call serve_json cs, 200, '{"ok":true,"userid":"'userid()'"}'
+    return
+  end
+  if method \= 'POST' then do
+    call serve_json cs, 405, '{"ok":false,"error":"method not allowed"}'
+    return
+  end
+  tok = cookie_tok(hdrs)
+  select
+    when path = '/api/login'  then call api_login cs, body
+    when path = '/api/logout' then call api_logout cs, tok
+    when path = '/api/cmd'    then call api_cmd cs, tok, body, hdrs
+    otherwise call serve_json cs, 404, '{"ok":false,"error":"not found"}'
+  end
+  return
+
+/* Read HTTP request from socket; return EBCDIC text. */
+http_read: procedure expose cfg.
+  parse arg cs
+  req = ''
+  hdrend = 0
+  need = 0
+  do 40
+    r = socket('Recv', cs, 2000)
+    parse var r rc n .
+    if rc \= 0 then leave
+    if \datatype(n,'W') then leave
+    if n = 0 then leave
+    raw = right(r, n)
+    t = socket('Translate', raw, 'To_Ebcdic')
+    parse var t trc tlen .
+    if trc \= 0 then leave
+    req = req || right(t, tlen)
+    if hdrend = 0 then do
+      p = pos('0D25'x||'0D25'x, req)
+      if p > 0 then do
+        hdrend = p + 4
+        need = hdrend - 1 + content_length(left(req, p - 1))
+      end
+    end
+    if hdrend > 0 & length(req) >= need then leave
+    if length(req) > cfg.max_body + 4096 then leave
+  end
+  return req
+
+content_length: procedure
+  parse arg hdrs
+  cl = 0
+  do while hdrs \= ''
+    parse var hdrs line '0D25'x hdrs
+    if left(translate(strip(line)), 15) = 'CONTENT-LENGTH:' then
+      cl = strip(substr(line, 16))
+  end
+  if datatype(cl, 'W') then return cl
+  return 0
+
+/* Send an HTTP response. body is EBCDIC text. */
+send_resp: procedure
+  parse arg cs, status, reason, ctype, body, extra
+  if extra = '' then extra = ''
+  resp = 'HTTP/1.0' status reason || '0D25'x ||,
+         'Content-Type:' ctype || '0D25'x ||,
+         'Connection: close' || '0D25'x ||,
+         'X-Content-Type-Options: nosniff' || '0D25'x ||,
+         extra ||,
+         '0D25'x || body
+  ta = socket('Translate', resp, 'To_Ascii')
+  parse var ta arc alen .
+  if arc \= 0 then return
+  sr = socket('Send', cs, right(ta, alen))
+  return
+
+serve_json: procedure
+  parse arg cs, status, json, extra
+  reason = 'OK'
+  if status = 400 then reason = 'Bad Request'
+  if status = 401 then reason = 'Unauthorized'
+  if status = 403 then reason = 'Forbidden'
+  if status = 404 then reason = 'Not Found'
+  if status = 405 then reason = 'Method Not Allowed'
+  if status = 413 then reason = 'Payload Too Large'
+  if status = 500 then reason = 'Internal Server Error'
+  call send_resp cs, status, reason, 'application/json', json, extra
+  return
+
+/* Serve a CMS file as static content. */
+serve_file: procedure
+  parse arg cs, fid, ctype
+  parse var fid fn ft fm .
+  if fn = '' | ft = '' | fm = '' then do
+    call serve_json cs, 500, '{"ok":false,"error":"bad file id"}'
+    return
+  end
+  body = ''
+  'EXECIO * DISKR' fn ft fm '(FINIS STEM L.'
+  if rc \= 0 then do
+    call serve_json cs, 404, '{"ok":false,"error":"ui not found"}'
+    return
+  end
+  do i = 1 to L.0
+    body = body || strip(L.i, 'T') || '0D25'x
+  end
+  call send_resp cs, 200, 'OK', ctype, body, ''
+  return
+
+hdr_val: procedure
+  parse arg hdrs, name
+  want = translate(strip(name)) || ':'
+  do while hdrs \= ''
+    parse var hdrs line '0D25'x hdrs
+    ul = translate(strip(line))
+    if abbrev(ul, want) then return strip(substr(strip(line), length(want) + 1))
+  end
+  return ''
+
+cookie_tok: procedure
+  parse arg hdrs
+  tok = ''
+  do while hdrs \= ''
+    parse var hdrs line '0D25'x hdrs
+    if left(translate(strip(line)), 7) = 'COOKIE:' then do
+      c = substr(line, 8)
+      p = pos('webcons=', c)
+      if p > 0 then do
+        tok = substr(c, p + 8)
+        sv = verify(tok, '0123456789abcdefABCDEF', 'N')
+        if sv > 0 then tok = left(tok, sv - 1)
+        else tok = strip(tok)
+      end
+    end
+  end
+  return tok
+
+sess_new: procedure expose sess. cfg.
+  tok = ''
+  csrf = ''
+  do i = 1 to 4
+    tok = tok || d2x(random(0,65535),4) || d2x(random(0,65535),4)
+    csrf = csrf || d2x(random(0,65535),4) || d2x(random(0,65535),4)
+  end
+  tok = translate(tok)
+  csrf = translate(csrf)
+  sess.tok = '1'
+  sess.exp.tok = time('S') + cfg.session_ttl
+  sess.csrf.tok = csrf
+  return tok csrf
+
+sess_ok: procedure expose sess. cfg.
+  parse arg tok
+  if tok = '' then return 0
+  if sess.tok \== '1' then return 0
+  if time('S') > sess.exp.tok then return 0
+  sess.exp.tok = time('S') + cfg.session_ttl
+  return 1
+
+sess_csrf: procedure expose sess.
+  parse arg tok
+  if tok = '' then return ''
+  return sess.csrf.tok
+
+sess_del: procedure expose sess.
+  parse arg tok
+  if tok = '' then return
+  sess.tok = '0'
+  return
+
+api_login: procedure expose cfg. sess.
+  parse arg cs, body
+  u = json_str(body, 'user')
+  p = json_str(body, 'pass')
+  if u \= cfg.userid | p \= cfg.pass then do
+    call audit 'AUTHFAIL' u
+    call serve_json cs, 401, '{"ok":false,"error":"bad credentials"}'
+    return
+  end
+  parse value sess_new() with tok csrf
+  call audit 'AUTHOK' u
+  extra = 'Set-Cookie: webcons=' || tok ||,
+          '; HttpOnly; SameSite=Strict' || '0D25'x
+  call serve_json cs, 200, '{"ok":true,"csrf":"'csrf'"}', extra
+  return
+
+api_logout: procedure expose sess.
+  parse arg cs, tok
+  call sess_del tok
+  extra = 'Set-Cookie: webcons=; Max-Age=0;' ||,
+          ' HttpOnly; SameSite=Strict' || '0D25'x
+  call serve_json cs, 200, '{"ok":true}', extra
+  return
+
+api_cmd: procedure expose cfg. sess.
+  parse arg cs, tok, body, hdrs
+  if \sess_ok(tok) then do
+    call serve_json cs, 401, '{"ok":false,"error":"not logged in"}'
+    return
+  end
+  want = sess_csrf(tok)
+  got = hdr_val(hdrs, 'X-CSRF-Token')
+  if want = '' | translate(got) \= want then do
+    call serve_json cs, 403, '{"ok":false,"error":"bad csrf"}'
+    return
+  end
+  cmd = json_str(body, 'cmd')
+  cmd = strip(cmd)
+  if cmd = '' then do
+    call serve_json cs, 400, '{"ok":false,"error":"empty command"}'
+    return
+  end
+  if \cmd_allowed(cmd) then do
+    call audit 'DENY' cmd
+    call serve_json cs, 403, '{"ok":false,"error":"command not allowed"}'
+    return
+  end
+  call audit 'CMD' cmd
+  parse value run_cmd(cmd) with rc '|' out
+  out = json_esc(out)
+  call serve_json cs, 200, '{"ok":true,"rc":'rc',"output":"'out'"}'
+  return
+
+/* Minimal JSON helpers. */
+json_str: procedure
+  parse arg body, key
+  needle = '"' || key || '"'
+  p = pos(needle, body)
+  if p = 0 then return ''
+  rest = substr(body, p + length(needle))
+  p = pos(':', rest)
+  if p = 0 then return ''
+  rest = strip(substr(rest, p + 1), 'L')
+  if left(rest, 1) \= '"' then return ''
+  rest = substr(rest, 2)
+  out = ''
+  do while rest \= ''
+    c = left(rest, 1)
+    rest = substr(rest, 2)
+    if c = '\' then do
+      e = left(rest, 1); rest = substr(rest, 2)
+      if e = 'n' then out = out || '0A'x
+      else if e = 'r' then out = out || '0D'x
+      else if e = 't' then out = out || '09'x
+      else out = out || e
+    end
+    else if c = '"' then leave
+    else out = out || c
+  end
+  return out
+
+json_esc: procedure
+  parse arg s
+  out = ''
+  do i = 1 to length(s)
+    c = substr(s, i, 1)
+    select
+      when c = '\' then out = out || '\\'
+      when c = '"' then out = out || '\"'
+      when c = '0D'x then out = out || '\r'
+      when c = '0A'x then out = out || '\n'
+      when c = '09'x then out = out || '\t'
+      otherwise out = out || c
+    end
+  end
+  return out
+
+cmd_allowed: procedure expose cfg.
+  parse arg cmd
+  ucmd = translate(strip(cmd))
+  /* deny wins */
+  do i = 1 to cfg.deny.0
+    if glob_match(ucmd, translate(cfg.deny.i)) then return 0
+  end
+  do i = 1 to cfg.allow.0
+    if glob_match(ucmd, translate(cfg.allow.i)) then return 1
+  end
+  return 0
+
+glob_match: procedure
+  parse arg text, pat
+  if right(pat, 2) = ' *' then do
+    pfx = left(pat, length(pat) - 2)
+    if text = pfx then return 1
+    return abbrev(text, pfx || ' ')
+  end
+  return text = pat
+
+run_cmd: procedure expose cfg.
+  parse arg cmd
+  out = ''
+  'MAKEBUF'
+  buf = rc
+  address command cmd '(STACK'
+  crc = rc
+  n = queued()
+  do i = 1 to n
+    parse pull line
+    o.i = line
+  end
+  'DROPBUF' buf
+  do i = n to 1 by -1
+    if length(out) + length(o.i) + 1 > cfg.max_out then do
+      out = out || '[output capped]' || '0A'x
+      leave
+    end
+    out = out || o.i || '0A'x
+  end
+  if length(out) > cfg.max_out then
+    out = left(out, cfg.max_out) || '[output capped]' || '0A'x
+  return crc || '|' || out
+
+cfg_load: procedure expose cfg.
+  parse arg fn, ft, fm
+  cfg.port = 8080
+  cfg.bind = 'INADDR_ANY'
+  cfg.userid = 'webuser'
+  cfg.pass = 'changeme'
+  cfg.session_ttl = 1800
+  cfg.max_body = 4096
+  cfg.max_out = 16384
+  cfg.logfile = 'WEBCONS LOG A'
+  cfg.uifile = 'WEBCONS HTML A'
+  cfg.auditfile = 'WEBCONS AUDIT A'
+  cfg.allow.0 = 0
+  cfg.deny.0 = 0
+  'EXECIO * DISKR' fn ft fm '(FINIS STEM C.'
+  if rc \= 0 then do
+    say 'WEBCONSRV: config not found, using defaults'
+    return
+  end
+  do i = 1 to C.0
+    line = strip(C.i)
+    if line = '' | left(line,1) = '*' then iterate
+    parse var line key rest
+    key = translate(strip(key))
+    rest = strip(rest)
+    select
+      when key = 'PORT'        then cfg.port = rest
+      when key = 'BIND'        then cfg.bind = rest
+      when key = 'USERID'      then cfg.userid = rest
+      when key = 'PASS'        then cfg.pass = rest
+      when key = 'PASSHASH'    then cfg.pass = rest
+      when key = 'SESSION_TTL' then cfg.session_ttl = rest
+      when key = 'MAX_BODY'    then cfg.max_body = rest
+      when key = 'MAX_OUT'     then cfg.max_out = rest
+      when key = 'LOGFILE'     then cfg.logfile = rest
+      when key = 'UIFILE'      then cfg.uifile = rest
+      when key = 'AUDITFILE'   then cfg.auditfile = rest
+      when key = 'ALLOW'       then call cfg_add 'ALLOW', rest
+      when key = 'DENY'        then call cfg_add 'DENY', rest
+      otherwise nop
+    end
+  end
+  return
+
+cfg_add: procedure expose cfg.
+  parse arg kind, val
+  if kind = 'ALLOW' then do
+    n = cfg.allow.0 + 1; cfg.allow.0 = n; cfg.allow.n = val
+  end
+  else do
+    n = cfg.deny.0 + 1; cfg.deny.0 = n; cfg.deny.n = val
+  end
+  return
+
+audit: procedure expose cfg.
+  parse arg kind, msg
+  parse var cfg.auditfile fn ft fm .
+  if fn = '' then return
+  line = date('S') time() userid() kind msg
+  push line
+  'EXECIO 1 DISKW' fn ft fm '(FINIS'
+  if rc \= 0 then say 'WEBCONSRV: audit rc=' rc
+  return

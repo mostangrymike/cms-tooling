@@ -25,6 +25,8 @@ SUPPORT_FILES = (
     "ci/cms-tooling.yml",
     "cms-execs/BFS2CMS.EXEC", "cms-execs/CMS2BFS.EXEC", "cms-execs/FIND.EXEC",
     "cms-execs/GREP.EXEC", "cms-execs/MKMODULE.EXEC", "cms-execs/PATCH.EXEC",
+    "cms-execs/WEBCONSR.EXEC", "cms-execs/WEBCONS.HTML",
+    "cms-execs/WEBCONFG.SAMPLE",
 )
 
 #: Python files the distribution deliberately exposes.  Local modules they
