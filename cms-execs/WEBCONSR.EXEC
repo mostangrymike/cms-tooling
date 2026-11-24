@@ -555,6 +555,9 @@ perf_collect: procedure expose cfg.
   call perf_parse_load out
   parse value run_cmd('CP QUERY USERS') with rc '|' uout
   call perf_parse_users uout
+  parse value run_cmd('CP QUERY ALLOC SPOOL') with rc '|' sout
+  parse value run_cmd('CP QUERY ALLOC PAGE') with rc '|' pout
+  call perf_parse_alloc2 sout, pout
   j = '{"ok":true,'
   j = j || '"avgproc":'avg','
   j = j || '"nproc":'nproc','
@@ -620,3 +623,24 @@ perf_parse_users: procedure expose users dialed net
     end
   end
   return
+
+perf_parse_alloc2: procedure expose spool_pct page_pct
+  parse arg sout, pout
+  spool_pct = perf_pct_used(sout)
+  page_pct = perf_pct_used(pout)
+  return
+
+perf_pct_used: procedure
+  parse arg out
+  pct = 0
+  do while out \= ''
+    parse var out line '0A'x out
+    u = translate(strip(line))
+    if abbrev(u, 'USABLE') | abbrev(u, 'SUMMARY') then do
+      w = words(u)
+      t = word(u, w)
+      t = strip(t, 'T', '%')
+      if datatype(t, 'W') then pct = t + 0
+    end
+  end
+  return pct
