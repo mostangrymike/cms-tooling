@@ -18,3 +18,8 @@
 # Retain historical machine-local validation captures.
 /[z]vm-*.json
 tnz.log
+
+# Machine-local scratch: a stale snapshot of an older tree and a backup of the
+# previous cmsawk source. Neither is a distribution input.
+/cms-tooling/
+/cmsawk-v06-cms-backup.c
