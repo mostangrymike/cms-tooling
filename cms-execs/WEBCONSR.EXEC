@@ -239,6 +239,13 @@ sess_del: procedure expose sess.
 
 api_login: procedure expose cfg. sess.
   parse arg cs, body
+  if cfg.noauth then do
+    parse value sess_new() with tok ctok
+    extra = 'Set-Cookie: webcons=' || tok ||,
+            '; HttpOnly; SameSite=Strict' || '0D25'x
+    call serve_json cs, 200, '{"ok":true,"csrf":"'ctok'"}', extra
+    return
+  end
   if cfg.lock_until > 0 & time('S') < cfg.lock_until then do
     call audit 'AUTHLOCK' ''
     call serve_json cs, 403, '{"ok":false,"error":"locked out"}'
@@ -310,15 +317,17 @@ api_logout: procedure expose sess.
 
 api_cmd: procedure expose cfg. sess.
   parse arg cs, tok, body, hdrs
-  if \sess_ok(tok) then do
-    call serve_json cs, 401, '{"ok":false,"error":"not logged in"}'
-    return
-  end
-  want = sess_csrf(tok)
-  got = hdr_val(hdrs, 'X-CSRF-Token')
-  if want = '' | translate(got) \= want then do
-    call serve_json cs, 403, '{"ok":false,"error":"bad csrf"}'
-    return
+  if \cfg.noauth then do
+    if \sess_ok(tok) then do
+      call serve_json cs, 401, '{"ok":false,"error":"not logged in"}'
+      return
+    end
+    want = sess_csrf(tok)
+    got = hdr_val(hdrs, 'X-CSRF-Token')
+    if want = '' | translate(got) \= want then do
+      call serve_json cs, 403, '{"ok":false,"error":"bad csrf"}'
+      return
+    end
   end
   cmd = json_str(body, 'cmd')
   cmd = strip(cmd)
@@ -466,6 +475,7 @@ cfg_load: procedure expose cfg.
   cfg.max_fail = 5
   cfg.lockout_sec = 300
   cfg.audit_max = 2000
+  cfg.noauth = 0
   cfg.logfile = 'WEBCONS LOG A'
   cfg.uifile = 'WEBCONS HTML A'
   cfg.auditfile = 'WEBCONS AUDIT A'
@@ -491,6 +501,7 @@ cfg_load: procedure expose cfg.
       when key = 'USERID'      then cfg.userid = rest
       when key = 'PASS'        then cfg.pass = rest
       when key = 'PASSHASH'    then cfg.passhash = rest
+      when key = 'NOAUTH'      then cfg.noauth = rest
       when key = 'SESSION_TTL' then cfg.session_ttl = rest
       when key = 'MAX_BODY'    then cfg.max_body = rest
       when key = 'MAX_OUT'     then cfg.max_out = rest
@@ -538,7 +549,7 @@ audit: procedure expose cfg.
 
 api_perf: procedure expose cfg. sess.
   parse arg cs, tok
-  if \sess_ok(tok) then do
+  if \cfg.noauth & \sess_ok(tok) then do
     call serve_json cs, 401, '{"ok":false,"error":"not logged in"}'
     return
   end

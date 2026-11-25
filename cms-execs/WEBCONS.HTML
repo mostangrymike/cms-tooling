@@ -20,7 +20,7 @@ label{font-size:13px;color:#bbb}
 <div class="warn">Plain HTTP on isolated LAN. No TLS. Credentials and
 commands travel in cleartext on the network.</div></header>
 <main>
-<div id="loginBox">
+<div id="loginBox" style="display:none">
  <div class="row"><label>User <input id="user" autocomplete="username"></label>
  <label>Password <input id="pass" type="password"
  autocomplete="current-password"></label>
@@ -69,7 +69,10 @@ async function login() {
     document.getElementById('loginBox').style.display='none';
     document.getElementById('app').style.display='block';
     show('logged in', 'ok');
-  } else show(j.error||'login failed', 'err');
+  } else {
+    document.getElementById('loginBox').style.display='block';
+    show(j.error||'login failed', 'err');
+  }
   document.getElementById('loginMsg').textContent = j.error||'';
 }
 async function runCmd() {
@@ -136,4 +139,6 @@ function drawCpu(){
 }
 const _login=login;
 login=async function(){ await _login(); if(CSRF){ pollPerf(); if(window._perfTimer) clearInterval(window._perfTimer); window._perfTimer=setInterval(pollPerf,5000); } };
+
+window.addEventListener("load",()=>{ login(); });
 </script></body></html>
