@@ -283,22 +283,36 @@ async function loadSpool(){
     renderSpool(j);
   }catch(e){ document.getElementById('spool').textContent='spool load failed'; }
 }
+let spoolSort={k:'id',dir:1};
+function sortSpool(k){
+  if(spoolSort.k===k) spoolSort.dir*=-1; else {spoolSort.k=k; spoolSort.dir=1;}
+  if(window._spoolData) renderSpool(window._spoolData);
+}
+function spoolHdr(label,k){
+  const m=spoolSort.k===k?(spoolSort.dir>0?' \u25b2':' \u25bc'):'';
+  return `<th class="def" style="cursor:pointer" onclick="sortSpool('${k}')">${label}${m}</th>`;
+}
 function renderSpool(j){
-  const rows=[];
-  function add(list,kind){
-    (list||[]).forEach(f=>{
-      rows.push(`<tr><td>${esc(kind)}</td><td>${esc(f.owner)}</td><td>${esc(f.id)}</td>
-      <td>${esc(f.class)}</td><td>${esc(f.type)}</td><td>${esc(f.records)}</td>
-      <td>${esc(f.hold)}</td><td>${esc(f.date)} ${esc(f.time)}</td>
-      <td>${esc(f.name)} ${esc(f.ftype)} ${esc(f.dist)}</td>
-      <td><button onclick="viewSpool('${esc(kind)}','${esc(f.owner)}','${esc(f.id)}','${esc(f.class)}','${esc(f.hold)}','${esc(f.name)}')">View</button>
-      <button onclick="deleteSpool('${esc(kind)}','${esc(f.owner)}','${esc(f.id)}')" style="background:#5a1a1a;border-color:#833">Delete</button></td></tr>`);
-    });
-  }
-  add(j.rdr,'RDR'); add(j.prt,'PRT');
+  window._spoolData=j;
+  const all=[];
+  (j.rdr||[]).forEach(f=>all.push(Object.assign({q:'RDR'},f)));
+  (j.prt||[]).forEach(f=>all.push(Object.assign({q:'PRT'},f)));
+  const k=spoolSort.k, d=spoolSort.dir;
+  all.sort((a,b)=>{
+    let va=a[k]||'', vb=b[k]||'';
+    if(k==='id'||k==='records'){ va=Number(va)||0; vb=Number(vb)||0; return (va-vb)*d; }
+    va=String(va).toUpperCase(); vb=String(vb).toUpperCase();
+    return va<vb?-d:va>vb?d:0;
+  });
+  const rows=all.map(f=>`<tr><td>${esc(f.q)}</td><td>${esc(f.owner)}</td><td>${esc(f.id)}</td>
+  <td>${esc(f.class)}</td><td>${esc(f.type)}</td><td>${esc(f.records)}</td>
+  <td>${esc(f.hold)}</td><td>${esc(f.date)} ${esc(f.time)}</td>
+  <td>${esc(f.name)} ${esc(f.ftype)} ${esc(f.dist)}</td>
+  <td><button onclick="viewSpool('${esc(f.q)}','${esc(f.owner)}','${esc(f.id)}','${esc(f.class)}','${esc(f.hold)}','${esc(f.name)}')">View</button>
+  <button onclick="deleteSpool('${esc(f.q)}','${esc(f.owner)}','${esc(f.id)}')" style="background:#5a1a1a;border-color:#833">Delete</button></td></tr>`);
   document.getElementById('spool').innerHTML=`<table>
-  <thead><tr><th>Q</th><th>Owner</th><th>ID</th><th>Cls</th><th>Type</th>
-  <th>Recs</th><th>Hold</th><th>Date/Time</th><th>Name</th><th></th></tr></thead>
+  <thead><tr>${spoolHdr('Q','q')}${spoolHdr('Owner','owner')}${spoolHdr('ID','id')}${spoolHdr('Cls','class')}${spoolHdr('Type','type')}
+  ${spoolHdr('Recs','records')}${spoolHdr('Hold','hold')}${spoolHdr('Date/Time','date')}<th>Name</th><th></th></tr></thead>
   <tbody>${rows.join('')||'<tr><td colspan="10">no spool files</td></tr>'}</tbody></table>`;
 }
 async function viewSpool(kind,owner,id,cls,hold,name){
