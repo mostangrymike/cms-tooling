@@ -35,6 +35,8 @@ commands travel in cleartext on the network.</div></header>
  </div>
  <div id="dash" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:10px;margin:10px 0"></div>
  <svg id="cpuChart" width="100%" height="120" style="background:#0c0c0c;border:1px solid #333;border-radius:4px;margin-bottom:12px"></svg>
+ <div style="font-size:12px;color:#bbb;margin-bottom:4px">System activity (no syslog daemon in z/VM 6.3)</div>
+ <pre id="syslog" style="background:#0c0c0c;border:1px solid #333;border-radius:4px;padding:8px;max-height:160px;overflow:auto;font-size:12px;margin:0 0 12px"></pre>
  <div class="row">
   <input id="cmd" size="72" placeholder="QUERY USERID" spellcheck="false">
   <button onclick="runCmd()">Run</button>
@@ -88,6 +90,19 @@ document.getElementById('cmd').addEventListener('keydown', e => {
 });
 
 let cpuHist=[];
+async function pollLog(){
+  try{
+    const r=await fetch('/api/log',{credentials:'same-origin'});
+    const j=await r.json();
+    if(!j.ok) return;
+    const lines=[];
+    const lm=(j.logmsg||'').trim();
+    if(lm && !/no logmsg/i.test(lm)) lines.push('logon message: '+lm);
+    (j.events||[]).forEach(function(e){ lines.push(e); });
+    document.getElementById('syslog').textContent =
+      lines.length ? lines.join('\n') : 'no events yet';
+  }catch(e){}
+}
 async function pollPerf(){
   try{
     const r=await fetch('/api/perf',{credentials:'same-origin'});
@@ -138,7 +153,15 @@ function drawCpu(){
   <polyline fill="none" stroke="#8fd18f" stroke-width="2" points="${pts}"/>`;
 }
 const _login=login;
-login=async function(){ await _login(); if(CSRF){ pollPerf(); if(window._perfTimer) clearInterval(window._perfTimer); window._perfTimer=setInterval(pollPerf,5000); } };
+login=async function(){
+  await _login();
+  if(!CSRF) return;
+  pollPerf(); pollLog();
+  if(window._perfTimer) clearInterval(window._perfTimer);
+  window._perfTimer=setInterval(pollPerf,5000);
+  if(window._logTimer) clearInterval(window._logTimer);
+  window._logTimer=setInterval(pollLog,10000);
+};
 
 window.addEventListener("load",()=>{ login(); });
 </script></body></html>

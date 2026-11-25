@@ -49,7 +49,7 @@ die: procedure expose cfg.
   exit 20
 
 /* Handle one HTTP connection. */
-handle: procedure expose cfg. sess.
+handle: procedure expose cfg. sess. ev. evn known. ev_init
   parse arg cs
   req = http_read(cs)
   if req = '' then return
@@ -73,6 +73,10 @@ handle: procedure expose cfg. sess.
   tok = cookie_tok(hdrs)
   if method = 'GET' & path = '/api/perf' then do
     call api_perf cs, tok
+    return
+  end
+  if method = 'GET' & path = '/api/log' then do
+    call api_syslog cs, tok
     return
   end
   if method \= 'POST' then do
@@ -546,6 +550,73 @@ audit: procedure expose cfg.
 
 
 /* --- Performance dashboard --- */
+
+api_syslog: procedure expose cfg. sess. ev. evn known. ev_init
+  parse arg cs, tok
+  if \cfg.noauth & \sess_ok(tok) then do
+    call serve_json cs, 401, '{"ok":false,"error":"not logged in"}'
+    return
+  end
+  parse value run_cmd('CP QUERY LOGMSG') with lrc '|' lout
+  parse value run_cmd('CP QUERY NAMES') with nrc '|' nout
+  now = time()
+  nu. = 0
+  ucount = 0
+  do while nout \= ''
+    parse var nout line '0A'x nout
+    line = translate(strip(line))
+    do while line \= ''
+      parse var line piece ',' line
+      parse var piece uid '-' .
+      uid = strip(uid)
+      if uid = '' then iterate
+      if words(uid) > 1 then iterate
+      if nu.uid = 1 then iterate
+      nu.uid = 1
+      ucount = ucount + 1
+      ulist.ucount = uid
+    end
+  end
+  if datatype(ev_init,'W') = 0 then ev_init = 0
+  if datatype(evn,'W') = 0 then evn = 0
+  if ev_init = 0 then ev_init = 1
+  else do
+    do i = 1 to ucount
+      u = ulist.i
+      if known.u = 1 then iterate
+      call ev_add now, u 'logged on'
+    end
+    do i = 1 to known.0
+      u = known.i
+      if nu.u = 1 then iterate
+      call ev_add now, u 'logged off'
+    end
+  end
+  known. = 0
+  known.0 = ucount
+  do i = 1 to ucount
+    u = ulist.i
+    known.u = 1
+    known.i = u
+  end
+  j = '{"ok":true,"users":'ucount',"logmsg":"'json_esc(strip(lout))'",'
+  j = j || '"events":['
+  do i = 1 to evn
+    if i > 1 then j = j || ','
+    j = j || '"' || json_esc(ev.i) || '"'
+  end
+  j = j || ']}'
+  call serve_json cs, 200, j
+  return
+
+ev_add: procedure expose ev. evn
+  parse arg ts, text
+  if evn < 50 then evn = evn + 1
+  do i = evn to 2 by -1
+    ev.i = ev.i - 1
+  end
+  ev.1 = ts text
+  return
 
 api_perf: procedure expose cfg. sess.
   parse arg cs, tok
