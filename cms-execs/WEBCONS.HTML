@@ -30,7 +30,16 @@ commands travel in cleartext on the network.</div></header>
 <div id="app" style="display:none">
  <div class="row" style="justify-content:space-between;align-items:center">
   <strong>z/VM Performance</strong>
-  <span><span id="perfTs" class="warn"></span>
+  <span style="display:flex;gap:8px;align-items:center">
+  <label style="font-size:12px;color:#bbb">Refresh
+  <select id="refreshSec" onchange="setRefresh()" style="font:12px monospace;padding:4px;background:#181818;color:#eee;border:1px solid #444;border-radius:4px">
+   <option value="0">Off</option>
+   <option value="5" selected>5s</option>
+   <option value="10">10s</option>
+   <option value="30">30s</option>
+   <option value="60">60s</option>
+  </select></label>
+  <span id="perfTs" class="warn"></span>
   <button onclick="logout()">Log out</button></span>
  </div>
  <div id="dash" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:10px;margin:10px 0"></div>
@@ -368,17 +377,23 @@ async function deleteAllSpool(){
   loadSpool();
 }
 function esc(s){return String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));}
+function setRefresh(){
+  const sec=Number(document.getElementById('refreshSec').value)||0;
+  if(window._perfTimer) clearInterval(window._perfTimer);
+  if(window._logTimer) clearInterval(window._logTimer);
+  if(window._topTimer) clearInterval(window._topTimer);
+  window._perfTimer=window._logTimer=window._topTimer=null;
+  if(sec<=0) return;
+  pollPerf(); pollLog(); pollTop(); loadSpool();
+  window._perfTimer=setInterval(pollPerf, sec*1000);
+  window._logTimer=setInterval(pollLog, Math.max(sec*1000,10000));
+  window._topTimer=setInterval(pollTop, Math.max(sec*1000,60000));
+}
 const _login=login;
 login=async function(){
   await _login();
   if(document.getElementById('app').style.display==='none') return;
-  pollPerf(); pollLog(); pollTop(); loadSpool();
-  if(window._perfTimer) clearInterval(window._perfTimer);
-  window._perfTimer=setInterval(pollPerf,5000);
-  if(window._logTimer) clearInterval(window._logTimer);
-  window._logTimer=setInterval(pollLog,10000);
-  if(window._topTimer) clearInterval(window._topTimer);
-  window._topTimer=setInterval(pollTop,60000);
+  setRefresh();
 };
 window.addEventListener("load",()=>{ login(); });
 </script></body></html>
