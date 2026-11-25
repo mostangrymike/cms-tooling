@@ -734,9 +734,9 @@ api_spool_purge: procedure expose cfg. sess.
   owner = translate(strip(json_str(body, 'owner')))
   sid = strip(json_str(body, 'id'))
   if all = 'TRUE' | all = '1' then do
-    if confirm \= 'DELETE ALL' then do
+    if confirm \= 'YES' & confirm \= 'DELETE ALL' then do
       call serve_json cs, 400,,
-        '{"ok":false,"error":"type DELETE ALL to confirm"}'
+        '{"ok":false,"error":"confirm required"}'
       return
     end
     call audit 'SPOOL' 'purge all' typ

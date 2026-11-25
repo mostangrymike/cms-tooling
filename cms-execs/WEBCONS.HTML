@@ -322,10 +322,11 @@ async function deleteSpool(kind,owner,id){
   loadSpool();
 }
 async function deleteAllSpool(){
-  const c=prompt('Type DELETE ALL to purge ALL users RDR and PRT spool files.\nThis is irreversible.');
-  if(c!=='DELETE ALL'){ show('delete all cancelled','warn'); return; }
+  if(!confirm('Purge ALL users RDR and PRT spool files?\nThis is irreversible.')) {
+    show('delete all cancelled','warn'); return;
+  }
   show('purging all...', 'warn');
-  const j=await api('/api/spool/purge',{type:'ALL',all:'true',confirm:c},{csrf:CSRF});
+  const j=await api('/api/spool/purge',{type:'ALL',all:'true',confirm:'YES'},{csrf:CSRF});
   show(j.ok?('purged '+(j.purged||0)+' files'):(j.error||'purge failed'), j.ok?'ok':'err');
   loadSpool();
 }
