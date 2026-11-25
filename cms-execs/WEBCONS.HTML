@@ -38,11 +38,56 @@ commands travel in cleartext on the network.</div></header>
  <div style="font-size:12px;color:#bbb;margin-bottom:4px">System activity (no syslog daemon in z/VM 6.3)</div>
  <pre id="syslog" style="background:#0c0c0c;border:1px solid #333;border-radius:4px;padding:8px;max-height:160px;overflow:auto;font-size:12px;margin:0 0 12px"></pre>
  <div class="row">
-  <input id="cmd" size="72" placeholder="QUERY USERID" spellcheck="false">
+  <select id="cmd" style="font:14px/1.3 monospace;padding:8px;border:1px solid #444;background:#181818;color:#eee;border-radius:4px;min-width:320px">
+   <option value="QUERY USERID">QUERY USERID</option>
+   <option value="QUERY NAMES">QUERY NAMES</option>
+   <option value="QUERY USERS">QUERY USERS</option>
+   <option value="QUERY DASD">QUERY DASD</option>
+   <option value="QUERY ALLOC">QUERY ALLOC</option>
+   <option value="QUERY STORAGE">QUERY STORAGE</option>
+   <option value="QUERY VIRTUAL">QUERY VIRTUAL</option>
+   <option value="QUERY CPLEVEL">QUERY CPLEVEL</option>
+   <option value="QUERY TIME">QUERY TIME</option>
+   <option value="QUERY TIMEZONE">QUERY TIMEZONE</option>
+   <option value="QUERY SET">QUERY SET</option>
+   <option value="QUERY SHARE">QUERY SHARE</option>
+   <option value="QUERY LINKS">QUERY LINKS</option>
+   <option value="QUERY MDCACHE">QUERY MDCACHE</option>
+   <option value="QUERY MDC">QUERY MDC</option>
+   <option value="QUERY SRM">QUERY SRM</option>
+   <option value="QUERY PROCESSORS">QUERY PROCESSORS</option>
+   <option value="QUERY PRIVCLASS">QUERY PRIVCLASS</option>
+   <option value="QUERY TERM">QUERY TERM</option>
+   <option value="QUERY TERMINAL">QUERY TERMINAL</option>
+   <option value="QUERY LOGMSG">QUERY LOGMSG</option>
+   <option value="QUERY READER">QUERY READER</option>
+   <option value="QUERY PRINTER">QUERY PRINTER</option>
+   <option value="QUERY PUNCH">QUERY PUNCH</option>
+   <option value="QUERY FILES">QUERY FILES</option>
+   <option value="QUERY NLS">QUERY NLS</option>
+   <option value="QUERY LINES">QUERY LINES</option>
+   <option value="QUERY PF">QUERY PF</option>
+   <option value="QUERY TRACE">QUERY TRACE</option>
+   <option value="QUERY PRODUCT">QUERY PRODUCT</option>
+   <option value="QUERY CPLOAD">QUERY CPLOAD</option>
+   <option value="QUERY CPUID">QUERY CPUID</option>
+   <option value="QUERY SSI">QUERY SSI</option>
+   <option value="QUERY SYSTEM">QUERY SYSTEM</option>
+   <option value="QUERY TDISK">QUERY TDISK</option>
+   <option value="QUERY VMLAN">QUERY VMLAN</option>
+   <option value="QUERY VSWITCH">QUERY VSWITCH</option>
+   <option value="QUERY NIC">QUERY NIC</option>
+   <option value="QUERY CONTROLLER">QUERY CONTROLLER</option>
+   <option value="QUERY CRYPTO">QUERY CRYPTO</option>
+   <option value="QUERY EDEVICE">QUERY EDEVICE</option>
+   <option value="QUERY HCD">QUERY HCD</option>
+   <option value="QUERY IOASSIST">QUERY IOASSIST</option>
+   <option value="QUERY SXSPAGES">QUERY SXSPAGES</option>
+   <option value="QUERY XSTORE">QUERY XSTORE</option>
+  </select>
   <button onclick="runCmd()">Run</button>
  </div>
- <div class="row warn">Allowlisted read-only commands by default. Output
-  capped. All commands audited.</div>
+ <div class="row warn">Select a CP QUERY command. Output capped and audited.</div>
  <div id="status" class="ok"></div>
  <div id="out"></div>
 </div>
