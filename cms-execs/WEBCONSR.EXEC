@@ -741,16 +741,10 @@ api_spool_purge: procedure expose cfg. sess.
     end
     call audit 'SPOOL' 'purge all' typ
     n = 0
-    if typ = 'RDR' | typ = 'ALL' | typ = '' then do
-      parse value run_cmd('CP PURGE * RDR ALL') with rc '|' out
-      n = n + purge_count(out)
-      call audit 'SPOOL' 'purge * rdr all rc='rc
-    end
-    if typ = 'PRT' | typ = 'ALL' | typ = '' then do
-      parse value run_cmd('CP PURGE * PRT ALL') with rc '|' out
-      n = n + purge_count(out)
-      call audit 'SPOOL' 'purge * prt all rc='rc
-    end
+    if typ = 'RDR' | typ = 'ALL' | typ = '' then
+      n = n + spool_purge_all('RDR')
+    if typ = 'PRT' | typ = 'ALL' | typ = '' then
+      n = n + spool_purge_all('PRT')
     call serve_json cs, 200, '{"ok":true,"purged":'n'}'
     return
   end
@@ -770,6 +764,32 @@ api_spool_purge: procedure expose cfg. sess.
   call serve_json cs, 200, '{"ok":'ok',"rc":'rc',"purged":'n',',
     '"output":"'json_esc(strip(out))'"}'
   return
+
+spool_purge_all: procedure expose cfg.
+  parse arg typ
+  cmd = 'CP QUERY' typ 'ALL'
+  parse value run_cmd(cmd) with . '|' out
+  n = 0
+  do while out \= ''
+    parse var out line '0A'x out
+    line = strip(line)
+    if line = '' then iterate
+    u = translate(line)
+    if abbrev(u,'OWNERID') | abbrev(u,'ORIGINID') then iterate
+    if abbrev(u,'NO ') then iterate
+    if abbrev(u,'READY') then iterate
+    parse var line owner spoolid .
+    if \datatype(spoolid,'W') then iterate
+    owner = translate(strip(owner))
+    spoolid = strip(spoolid)
+    parse value run_cmd('CP PURGE' owner typ spoolid),
+      with rc '|' pout
+    c = purge_count(pout)
+    if c > 0 then n = n + c
+    else if rc = 0 then n = n + 1
+  end
+  call audit 'SPOOL' 'purge all' typ 'n='n
+  return n
 
 purge_count: procedure
   parse arg out
