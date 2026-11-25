@@ -251,28 +251,51 @@ function drawCpu(){
   <line x1="${pad}" y1="${pad}" x2="${w-pad}" y2="${pad}" stroke="#222"/>
   <polyline fill="none" stroke="#8fd18f" stroke-width="2" points="${pts}"/>`;
 }
+let topSort={k:'io',dir:-1};
+function sortTop(k){
+  if(topSort.k===k) topSort.dir*=-1; else {topSort.k=k; topSort.dir=(k==='id'?1:-1);}
+  if(window._topData) renderTop(window._topData);
+}
+function topHdr(label,k,defk){
+  const m=topSort.k===k?(topSort.dir>0?' \u25b2':' \u25bc'):'';
+  const t=defk?tip(defk):'';
+  return `<th class="def" style="cursor:pointer"${t} onclick="sortTop('${k}')">${label}${m}</th>`;
+}
+function renderTop(users){
+  window._topData=users;
+  const k=topSort.k, d=topSort.dir;
+  const arr=(users||[]).slice().sort((a,b)=>{
+    let va=a[k]||'', vb=b[k]||'';
+    if(k==='id'||k==='ctime'||k==='vtime'||k==='ttime'){
+      va=String(va).toUpperCase(); vb=String(vb).toUpperCase();
+      return va<vb?-d:va>vb?d:0;
+    }
+    va=Number(va)||0; vb=Number(vb)||0; return (va-vb)*d;
+  });
+  const rows=arr.map(u=>`<tr><td>${esc(u.id)}</td>
+  <td${tip('ctime')}>${esc(u.ctime||'')}</td>
+  <td${tip('vtime')}>${esc(u.vtime||'')}</td>
+  <td${tip('ttime')}>${esc(u.ttime||'')}</td>
+  <td${tip('io')}>${u.io||0}</td>
+  <td${tip('res')}>${u.res||0}</td>
+  <td${tip('ws')}>${u.ws||0}</td>
+  <td${tip('inst')}>${u.inst||0}</td>
+  <td${tip('pread')}>${u.pread||0}</td>
+  <td${tip('pwrite')}>${u.pwrite||0}</td></tr>`).join('');
+  document.getElementById('top').innerHTML=`<table>
+  <thead><tr>${topHdr('User','id','')}${topHdr('CTIME','ctime','ctime')}
+  ${topHdr('VTIME','vtime','vtime')}${topHdr('TTIME','ttime','ttime')}
+  ${topHdr('I/O','io','io')}${topHdr('RES','res','res')}
+  ${topHdr('WS','ws','ws')}${topHdr('INSTAN','inst','inst')}
+  ${topHdr('PREAD','pread','pread')}${topHdr('PWRIT','pwrite','pwrite')}</tr></thead>
+  <tbody>${rows||'<tr><td colspan="10">no data</td></tr>'}</tbody></table>`;
+}
 async function pollTop(){
   try{
     const r=await fetch('/api/top',{credentials:'same-origin'});
     const j=await r.json();
     if(!j.ok) return;
-    const rows=(j.users||[]).map(u=>`<tr><td>${esc(u.id)}</td>
-    <td${tip('ctime')}>${esc(u.ctime||'')}</td>
-    <td${tip('vtime')}>${esc(u.vtime||'')}</td>
-    <td${tip('ttime')}>${esc(u.ttime||'')}</td>
-    <td${tip('io')}>${u.io||0}</td>
-    <td${tip('res')}>${u.res||0}</td>
-    <td${tip('ws')}>${u.ws||0}</td>
-    <td${tip('inst')}>${u.inst||0}</td>
-    <td${tip('pread')}>${u.pread||0}</td>
-    <td${tip('pwrite')}>${u.pwrite||0}</td></tr>`).join('');
-    document.getElementById('top').innerHTML=`<table>
-    <thead><tr><th>User</th><th class="def"${tip('ctime')}>CTIME</th>
-    <th class="def"${tip('vtime')}>VTIME</th><th class="def"${tip('ttime')}>TTIME</th>
-    <th class="def"${tip('io')}>I/O</th><th class="def"${tip('res')}>RES</th>
-    <th class="def"${tip('ws')}>WS</th><th class="def"${tip('inst')}>INSTAN</th>
-    <th class="def"${tip('pread')}>PREAD</th><th class="def"${tip('pwrite')}>PWRIT</th></tr></thead>
-    <tbody>${rows||'<tr><td colspan="10">no data</td></tr>'}</tbody></table>`;
+    renderTop(j.users||[]);
   }catch(e){}
 }
 async function loadSpool(){
