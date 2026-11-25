@@ -291,7 +291,8 @@ function renderSpool(j){
       <td>${esc(f.class)}</td><td>${esc(f.type)}</td><td>${esc(f.records)}</td>
       <td>${esc(f.hold)}</td><td>${esc(f.date)} ${esc(f.time)}</td>
       <td>${esc(f.name)} ${esc(f.ftype)} ${esc(f.dist)}</td>
-      <td><button onclick="deleteSpool('${esc(kind)}','${esc(f.owner)}','${esc(f.id)}')" style="background:#5a1a1a;border-color:#833">Delete</button></td></tr>`);
+      <td><button onclick="viewSpool('${esc(kind)}','${esc(f.owner)}','${esc(f.id)}','${esc(f.class)}','${esc(f.hold)}','${esc(f.name)}')">View</button>
+      <button onclick="deleteSpool('${esc(kind)}','${esc(f.owner)}','${esc(f.id)}')" style="background:#5a1a1a;border-color:#833">Delete</button></td></tr>`);
     });
   }
   add(j.rdr,'RDR'); add(j.prt,'PRT');
@@ -299,6 +300,19 @@ function renderSpool(j){
   <thead><tr><th>Q</th><th>Owner</th><th>ID</th><th>Cls</th><th>Type</th>
   <th>Recs</th><th>Hold</th><th>Date/Time</th><th>Name</th><th></th></tr></thead>
   <tbody>${rows.join('')||'<tr><td colspan="10">no spool files</td></tr>'}</tbody></table>`;
+}
+async function viewSpool(kind,owner,id,cls,hold,name){
+  show('reading spool '+id+'...', 'warn');
+  const j=await api('/api/spool/read',{type:kind,owner:owner,id:id,class:cls,hold:hold,name:name},{csrf:CSRF});
+  if(j.ok){
+    show('spool '+kind+' '+id+' '+owner+(j.note?' ('+j.note+')':''),'ok');
+    document.getElementById('out').textContent=j.output||'(empty)';
+    document.getElementById('out').scrollIntoView({behavior:'smooth'});
+  }else{
+    show(j.error||'read failed','err');
+    document.getElementById('out').textContent=j.output||j.error||'';
+  }
+  loadSpool();
 }
 async function deleteSpool(kind,owner,id){
   if(!confirm('Purge '+kind+' '+id+' owned by '+owner+'?')) return;

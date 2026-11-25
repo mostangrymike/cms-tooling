@@ -104,6 +104,8 @@ handle: procedure expose cfg. sess. ev. evn known. ev_init
     when path = '/api/cmd'    then call api_cmd cs, tok, body, hdrs
     when path = '/api/spool/purge' then,
       call api_spool_purge cs, tok, body, hdrs
+    when path = '/api/spool/read' then,
+      call api_spool_read cs, tok, body, hdrs
     otherwise call serve_json cs, 404, '{"ok":false,"error":"not found"}'
   end
   return
@@ -783,6 +785,166 @@ purge_count: procedure
     end
   end
   return n
+
+api_spool_read: procedure expose cfg. sess.
+  parse arg cs, tok, body, hdrs
+  if \cfg.noauth then do
+    if \sess_ok(tok) then do
+      call serve_json cs, 401, '{"ok":false,"error":"not logged in"}'
+      return
+    end
+    want = sess_csrf(tok)
+    got = hdr_val(hdrs, 'X-CSRF-Token')
+    if want = '' | translate(got) \= want then do
+      call serve_json cs, 403, '{"ok":false,"error":"bad csrf"}'
+      return
+    end
+  end
+  typ = translate(strip(json_str(body, 'type')))
+  owner = translate(strip(json_str(body, 'owner')))
+  sid = strip(json_str(body, 'id'))
+  ocls = translate(strip(json_str(body, 'class')))
+  ohold = translate(strip(json_str(body, 'hold')))
+  oname = strip(json_str(body, 'name'))
+  if typ \= 'RDR' & typ \= 'PRT' & typ \= 'PUN' then do
+    call serve_json cs, 400, '{"ok":false,"error":"bad type"}'
+    return
+  end
+  if \datatype(sid,'W') | owner = '' then do
+    call serve_json cs, 400, '{"ok":false,"error":"need owner and id"}'
+    return
+  end
+  if ocls = '' then ocls = 'A'
+  if oname = '' then oname = 'SPOOLRD'
+  oname = left(translate(strip(oname)), 8)
+  call audit 'SPOOL' 'read' owner typ sid
+  'ERASE SPOOLRD TMP A'
+  parse value run_cmd('CP TRANSFER' owner typ sid 'WEBCONS RDR'),
+    with rc '|' tout
+  if rc \= 0 then do
+    call serve_json cs, 200, '{"ok":false,"rc":'rc',',
+      '"error":"'json_esc(strip(tout))'"}'
+    return
+  end
+  parse value run_cmd('CP QUERY RDR WEBCONS ALL') with . '|' q1
+  nid = sid; found = 0
+  do while q1 \= ''
+    parse var q1 ln '0A'x q1
+    parse var ln . f .
+    if datatype(strip(f),'W') then do
+      nid = strip(f); found = 1
+      if strip(f) = strip(sid) then leave
+    end
+  end
+  if \found then do
+    parse value run_cmd('CP QUERY RDR *') with . '|' q2
+    do while q2 \= ''
+      parse var q2 ln '0A'x q2
+      parse var ln . f .
+      if datatype(strip(f),'W') then nid = strip(f)
+    end
+  end
+  'PIPE CMS RECEIVE' nid 'SPOOLRD TMP A (REPLACE OLDDATE | stem R.'
+  rrc = rc
+  rout = ''
+  if symbol('R.0') = 'VAR' then do i=1 to R.0
+    rout = rout || R.i || '0A'x
+  end
+  if rrc \= 0 then do
+    'RECEIVE' nid 'SPOOLRD TMP A (REPLACE OLDDATE'
+    rrc = rc
+  end
+  out = ''
+  if rrc = 0 then do
+    'EXECIO * DISKR SPOOLRD TMP A (FINIS STEM L.'
+    if rc = 0 then do
+      do i = 1 to L.0
+        line = L.i
+        if length(out) + length(line) + 1 > cfg.max_out then do
+          out = out || '[output capped]' || '0A'x
+          leave
+        end
+        out = out || line || '0A'x
+      end
+    end
+  end
+  /* restore: punch back directly to owner */
+  restored = 0
+  trc = 0
+  if rrc = 0 then do
+    'CP SPOOL PUNCH TO' owner 'CLASS' ocls 'NOHOLD'
+    'PUNCH SPOOLRD TMP A (NOH'
+    'CP CLOSE PUNCH NAME' oname
+    trc = rc
+    'CP SPOOL PUNCH OFF'
+    if trc = 0 then do
+      restored = 1
+      parse value run_cmd('CP QUERY RDR' owner 'ALL') with . '|' qout
+      newid = spool_last_id(qout)
+      if newid \= '' then do
+        'CP CHANGE * RDR' newid 'NAME' oname
+        if ohold \= '' & ohold \= 'NONE' then
+          'CP CHANGE * RDR' newid 'HOLD' ohold
+        if typ \= 'RDR' then
+          'CP TRANSFER * RDR' newid owner typ
+      end
+    end
+  end
+  else do
+    'CP TRANSFER WEBCONS RDR' nid owner typ
+    if rc = 0 then restored = 1
+  end
+  'ERASE SPOOLRD TMP A'
+  rok = 'true'
+  if rrc \= 0 then rok = 'false'
+  note = 'spoolid may change on restore'
+  if \restored then note = note '; restore rc='trc
+  call serve_json cs, 200, '{"ok":'rok',"rc":'rrc',',
+    '"output":"'json_esc(out)'","note":"'json_esc(note)'"}'
+  return
+
+spool_webrdr_id: procedure
+  parse arg want
+  parse value run_cmd('CP QUERY RDR WEBCONS ALL') with . '|' out
+  id = want
+  found = 0
+  do while out \= ''
+    parse var out line '0A'x out
+    line = strip(line)
+    if line = '' then iterate
+    parse var line . f .
+    if \datatype(strip(f),'W') then iterate
+    id = strip(f)
+    found = 1
+    if strip(f) = strip(want) then return strip(f)
+  end
+  if found then return id
+  parse value run_cmd('CP QUERY RDR *') with . '|' out2
+  do while out2 \= ''
+    parse var out2 line '0A'x out2
+    line = strip(line)
+    parse var line . f .
+    if \datatype(strip(f),'W') then iterate
+    id = strip(f)
+  end
+  return id
+
+spool_last_id: procedure
+  parse arg out
+  id = ''
+  do while out \= ''
+    parse var out line '0A'x out
+    line = strip(line)
+    if line = '' then iterate
+    parse var line . f .
+    if \datatype(strip(f),'W') then iterate
+    id = strip(f)
+  end
+  return id
+
+spool_webrdr_last: procedure
+  parse value run_cmd('CP QUERY RDR WEBCONS ALL') with . '|' out
+  return spool_last_id(out)
 
 api_syslog: procedure expose cfg. sess. ev. evn known. ev_init
   parse arg cs, tok
