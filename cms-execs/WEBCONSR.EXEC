@@ -90,6 +90,10 @@ handle: procedure expose cfg. sess. ev. evn known. ev_init
     call api_top cs, tok
     return
   end
+  if method = 'GET' & path = '/api/spool' then do
+    call api_spool cs, tok
+    return
+  end
   if method \= 'POST' then do
     call serve_json cs, 405, '{"ok":false,"error":"method not allowed"}'
     return
@@ -98,6 +102,8 @@ handle: procedure expose cfg. sess. ev. evn known. ev_init
     when path = '/api/login'  then call api_login cs, body
     when path = '/api/logout' then call api_logout cs, tok
     when path = '/api/cmd'    then call api_cmd cs, tok, body, hdrs
+    when path = '/api/spool/purge' then,
+      call api_spool_purge cs, tok, body, hdrs
     otherwise call serve_json cs, 404, '{"ok":false,"error":"not found"}'
   end
   return
@@ -655,6 +661,128 @@ top_parse: procedure
   uj = uj || '"io":'io',"res":'res',"ws":'ws',"inst":'inst','
   uj = uj || '"pread":'pread',"pwrite":'pwrite'}'
   return uj
+
+api_spool: procedure expose cfg. sess.
+  parse arg cs, tok
+  if \cfg.noauth & \sess_ok(tok) then do
+    call serve_json cs, 401, '{"ok":false,"error":"not logged in"}'
+    return
+  end
+  parse value run_cmd('CP QUERY RDR ALL') with rrc '|' rout
+  parse value run_cmd('CP QUERY PRT ALL') with prc '|' pout
+  j = '{"ok":true,"rdr":['
+  j = j || spool_json(rout)
+  j = j || '],"prt":['
+  j = j || spool_json(pout)
+  j = j || ']}'
+  call serve_json cs, 200, j
+  return
+
+spool_json: procedure
+  parse arg out
+  j = ''
+  first = 1
+  do while out \= ''
+    parse var out line '0A'x out
+    line = strip(line)
+    if line = '' then iterate
+    u = translate(line)
+    if abbrev(u, 'OWNERID') then iterate
+    if abbrev(u, 'ORIGINID') then iterate
+    if abbrev(u, 'NO ') then iterate
+    if abbrev(u, 'READY') then iterate
+    parse var line owner spoolid cls devtype recs cpy hold date time rest
+    if \datatype(spoolid,'W') then iterate
+    rest = strip(rest)
+    fname = ''; ftype = ''; dist = ''
+    if rest \= '' then parse var rest fname ftype dist
+    if first then first = 0
+    else j = j || ','
+    j = j || '{"owner":"'json_esc(strip(owner))'",'
+    j = j || '"id":"'json_esc(strip(spoolid))'",'
+    j = j || '"class":"'json_esc(strip(cls))'",'
+    j = j || '"type":"'json_esc(strip(devtype))'",'
+    j = j || '"records":"'json_esc(strip(recs))'",'
+    j = j || '"hold":"'json_esc(strip(hold))'",'
+    j = j || '"date":"'json_esc(strip(date))'",'
+    j = j || '"time":"'json_esc(strip(time))'",'
+    j = j || '"name":"'json_esc(strip(fname))'",'
+    j = j || '"ftype":"'json_esc(strip(ftype))'",'
+    j = j || '"dist":"'json_esc(strip(dist))'"}'
+  end
+  return j
+
+api_spool_purge: procedure expose cfg. sess.
+  parse arg cs, tok, body, hdrs
+  if \cfg.noauth then do
+    if \sess_ok(tok) then do
+      call serve_json cs, 401, '{"ok":false,"error":"not logged in"}'
+      return
+    end
+    want = sess_csrf(tok)
+    got = hdr_val(hdrs, 'X-CSRF-Token')
+    if want = '' | translate(got) \= want then do
+      call serve_json cs, 403, '{"ok":false,"error":"bad csrf"}'
+      return
+    end
+  end
+  typ = translate(strip(json_str(body, 'type')))
+  all = translate(strip(json_str(body, 'all')))
+  confirm = strip(json_str(body, 'confirm'))
+  owner = translate(strip(json_str(body, 'owner')))
+  sid = strip(json_str(body, 'id'))
+  if all = 'TRUE' | all = '1' then do
+    if confirm \= 'DELETE ALL' then do
+      call serve_json cs, 400,,
+        '{"ok":false,"error":"type DELETE ALL to confirm"}'
+      return
+    end
+    call audit 'SPOOL' 'purge all' typ
+    n = 0
+    if typ = 'RDR' | typ = 'ALL' | typ = '' then do
+      parse value run_cmd('CP PURGE * RDR ALL') with rc '|' out
+      n = n + purge_count(out)
+      call audit 'SPOOL' 'purge * rdr all rc='rc
+    end
+    if typ = 'PRT' | typ = 'ALL' | typ = '' then do
+      parse value run_cmd('CP PURGE * PRT ALL') with rc '|' out
+      n = n + purge_count(out)
+      call audit 'SPOOL' 'purge * prt all rc='rc
+    end
+    call serve_json cs, 200, '{"ok":true,"purged":'n'}'
+    return
+  end
+  if typ \= 'RDR' & typ \= 'PRT' then do
+    call serve_json cs, 400, '{"ok":false,"error":"bad type"}'
+    return
+  end
+  if \datatype(sid,'W') | owner = '' then do
+    call serve_json cs, 400, '{"ok":false,"error":"need owner and id"}'
+    return
+  end
+  call audit 'SPOOL' 'purge' owner typ sid
+  parse value run_cmd('CP PURGE' owner typ sid) with rc '|' out
+  n = purge_count(out)
+  ok = 'true'
+  if n = 0 then ok = 'false'
+  call serve_json cs, 200, '{"ok":'ok',"rc":'rc',"purged":'n',',
+    '"output":"'json_esc(strip(out))'"}'
+  return
+
+purge_count: procedure
+  parse arg out
+  n = 0
+  do while out \= ''
+    parse var out line '0A'x out
+    u = translate(strip(line))
+    if pos('NO FILES PURGED', u) > 0 then iterate
+    if pos('FILE', u) > 0 & pos('PURGED', u) > 0 then do
+      parse var u k 'FILE' .
+      if datatype(strip(k),'W') then n = n + (strip(k) + 0)
+      else n = n + 1
+    end
+  end
+  return n
 
 api_syslog: procedure expose cfg. sess. ev. evn known. ev_init
   parse arg cs, tok

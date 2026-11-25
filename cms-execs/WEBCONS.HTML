@@ -37,6 +37,14 @@ commands travel in cleartext on the network.</div></header>
  <svg id="cpuChart" width="100%" height="120" style="background:#0c0c0c;border:1px solid #333;border-radius:4px;margin-bottom:12px"></svg>
  <div style="font-size:12px;color:#bbb;margin-bottom:4px">System activity (no syslog daemon in z/VM 6.3)</div>
  <pre id="syslog" style="background:#0c0c0c;border:1px solid #333;border-radius:4px;padding:8px;max-height:160px;overflow:auto;font-size:12px;margin:0 0 12px"></pre>
+ <div style="font-size:12px;color:#bbb;margin:4px 0">Top consumers (60s poll, INDICATE USER per logged-on user)</div>
+ <div id="top" style="background:#0c0c0c;border:1px solid #333;border-radius:4px;padding:8px;max-height:220px;overflow:auto;margin:0 0 12px"></div>
+ <div class="row" style="justify-content:space-between;align-items:center">
+  <div style="font-size:12px;color:#bbb">Spool files (all users, CP QUERY RDR/PRT ALL)</div>
+  <div><button onclick="loadSpool()">Refresh</button>
+  <button onclick="deleteAllSpool()" style="background:#5a1a1a;border-color:#833">Delete All RDR+PRT</button></div>
+ </div>
+ <div id="spool" style="background:#0c0c0c;border:1px solid #333;border-radius:4px;padding:8px;max-height:260px;overflow:auto;margin:0 0 12px"></div>
  <div class="row">
   <select id="cmd" style="font:14px/1.3 monospace;padding:8px;border:1px solid #444;background:#181818;color:#eee;border-radius:4px;min-width:320px">
    <option value="QUERY USERID">QUERY USERID</option>
@@ -267,12 +275,52 @@ async function pollTop(){
     <tbody>${rows||'<tr><td colspan="10">no data</td></tr>'}</tbody></table>`;
   }catch(e){}
 }
+async function loadSpool(){
+  try{
+    const r=await fetch('/api/spool',{credentials:'same-origin'});
+    const j=await r.json();
+    if(!j.ok){ document.getElementById('spool').textContent=j.error||'error'; return; }
+    renderSpool(j);
+  }catch(e){ document.getElementById('spool').textContent='spool load failed'; }
+}
+function renderSpool(j){
+  const rows=[];
+  function add(list,kind){
+    (list||[]).forEach(f=>{
+      rows.push(`<tr><td>${esc(kind)}</td><td>${esc(f.owner)}</td><td>${esc(f.id)}</td>
+      <td>${esc(f.class)}</td><td>${esc(f.type)}</td><td>${esc(f.records)}</td>
+      <td>${esc(f.hold)}</td><td>${esc(f.date)} ${esc(f.time)}</td>
+      <td>${esc(f.name)} ${esc(f.ftype)} ${esc(f.dist)}</td>
+      <td><button onclick="deleteSpool('${esc(kind)}','${esc(f.owner)}','${esc(f.id)}')" style="background:#5a1a1a;border-color:#833">Delete</button></td></tr>`);
+    });
+  }
+  add(j.rdr,'RDR'); add(j.prt,'PRT');
+  document.getElementById('spool').innerHTML=`<table>
+  <thead><tr><th>Q</th><th>Owner</th><th>ID</th><th>Cls</th><th>Type</th>
+  <th>Recs</th><th>Hold</th><th>Date/Time</th><th>Name</th><th></th></tr></thead>
+  <tbody>${rows.join('')||'<tr><td colspan="10">no spool files</td></tr>'}</tbody></table>`;
+}
+async function deleteSpool(kind,owner,id){
+  if(!confirm('Purge '+kind+' '+id+' owned by '+owner+'?')) return;
+  show('purging...', 'warn');
+  const j=await api('/api/spool/purge',{type:kind,owner:owner,id:id},{csrf:CSRF});
+  show(j.ok?('purged '+(j.purged||0)):(j.error||'purge failed'), j.ok?'ok':'err');
+  loadSpool();
+}
+async function deleteAllSpool(){
+  const c=prompt('Type DELETE ALL to purge ALL users RDR and PRT spool files.\nThis is irreversible.');
+  if(c!=='DELETE ALL'){ show('delete all cancelled','warn'); return; }
+  show('purging all...', 'warn');
+  const j=await api('/api/spool/purge',{type:'ALL',all:'true',confirm:c},{csrf:CSRF});
+  show(j.ok?('purged '+(j.purged||0)+' files'):(j.error||'purge failed'), j.ok?'ok':'err');
+  loadSpool();
+}
 function esc(s){return String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));}
 const _login=login;
 login=async function(){
   await _login();
   if(document.getElementById('app').style.display==='none') return;
-  pollPerf(); pollLog(); pollTop();
+  pollPerf(); pollLog(); pollTop(); loadSpool();
   if(window._perfTimer) clearInterval(window._perfTimer);
   window._perfTimer=setInterval(pollPerf,5000);
   if(window._logTimer) clearInterval(window._logTimer);
