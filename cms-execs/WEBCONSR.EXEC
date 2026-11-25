@@ -859,7 +859,7 @@ api_spool_read: procedure expose cfg. sess.
     'EXECIO * DISKR SPOOLRD TMP A (FINIS STEM L.'
     if rc = 0 then do
       do i = 1 to L.0
-        line = L.i
+        line = strip(L.i, 'T')
         if length(out) + length(line) + 1 > cfg.max_out then do
           out = out || '[output capped]' || '0A'x
           leave
