@@ -49,6 +49,39 @@ commands travel in cleartext on the network.</div></header>
 </main>
 <script>
 let CSRF='';
+const D={
+ avg:'Average CPU busy across all online processors.',
+ proc:'CPU busy for this individual processor.',
+ users:'Logged-on virtual machines (QUERY USERS).',
+ dialed:'Users connected through dialed lines (QUERY USERS).',
+ net:'Users connected through VTAM/RSCS/network (QUERY USERS).',
+ paging:'Page movement rate, pages/second (INDICATE LOAD).',
+ mdchit:'Minidisk cache hit ratio (INDICATE LOAD).',
+ mdcrw:'Minidisk cache reads and writes per second.',
+ q0:'Q0: virtual machines in dispatch list, in queue (INDICATE LOAD).',
+ q1:'Q1: dispatch list, short-running users (INDICATE LOAD).',
+ q2:'Q2: dispatch list, medium-running users (INDICATE LOAD).',
+ q3:'Q3: dispatch list, long-running users (INDICATE LOAD).',
+ e1:'E1: eligible list 1, waiting for dispatch list (INDICATE LOAD).',
+ e2:'E2: eligible list 2 (INDICATE LOAD).',
+ e3:'E3: eligible list 3 (INDICATE LOAD).',
+ dorm:'Dormant: logged-on users not in dispatch/eligible lists.',
+ lim:'LIMITED: users prevented from entering dispatch list.',
+ disp:'Dispatchable users (INDICATE ACTIVE).',
+ elig:'Eligible users waiting for dispatch list (INDICATE ACTIVE).',
+ spool:'Spool space in use on this volume (CP QUERY ALLOC).',
+ page:'Paging space in use on this volume (CP QUERY ALLOC).',
+ drct:'CP directory space in use on this volume (CP QUERY ALLOC).',
+ ctime:'CTIME: virtual CPU time charged, includes supervisor.',
+ vtime:'VTIME: virtual CPU time used in problem state.',
+ ttime:'TTIME: total CPU time (supervisor + problem state).',
+ io:'I/O: non-spooled I/O operations started by user.',
+ res:'RES: resident pages in host storage.',
+ ws:'WS: working-set pages.',
+ inst:'INSTAN: instantiated pages.',
+ pread:'READS: page reads from paging space.',
+ pwrite:'WRITES: page writes to paging space.'};
+function tip(k){return D[k]?' title="'+D[k]+'"':''}
 async function api(path, body, extra) {
   const h = {'Content-Type':'application/json'};
   if (extra && extra.csrf) h['X-CSRF-Token'] = extra.csrf;
@@ -111,28 +144,41 @@ async function pollPerf(){
     renderPerf(j);
   }catch(e){}
 }
-function card(title,val,sub){
-  return `<div style="background:#181818;border:1px solid #333;border-radius:6px;padding:10px">
-  <div style="color:#bbb;font-size:12px">${title}</div>
+function card(title,val,sub,defKey){
+  const t=defKey?tip(defKey):'';
+  return `<div style="background:#181818;border:1px solid #333;border-radius:6px;padding:10px"${t}>
+  <div style="color:#bbb;font-size:12px"><span class="${defKey?'def':''}">${title}</span></div>
   <div style="font-size:28px;font-weight:600">${val}</div>
   <div style="color:#888;font-size:12px">${sub||''}</div></div>`;
 }
-function bar(label,pct,color){
+function bar(label,pct,color,defKey){
   pct=Math.max(0,Math.min(100,Number(pct)||0));
-  return `<div style="margin:6px 0"><div style="font-size:12px;color:#bbb">${label} ${pct}%</div>
+  const t=defKey?tip(defKey):'';
+  return `<div style="margin:6px 0"${t}><div style="font-size:12px;color:#bbb"><span class="${defKey?'def':''}">${label}</span> ${pct}%</div>
   <div style="background:#333;border-radius:4px;height:10px"><div style="width:${pct}%;height:10px;border-radius:4px;background:${color}"></div></div></div>`;
 }
 function renderPerf(j){
   document.getElementById('perfTs').textContent=new Date().toLocaleTimeString();
   cpuHist.push(Number(j.avgproc)||0); if(cpuHist.length>60) cpuHist.shift();
+  const procs=(j.procs||[]).map(p=>'<span class="def"'+tip('proc')+'>P'+p.id+':'+p.pct+'%</span>').join(' ');
+  const qsub='<span class="def"'+tip('q2')+'>Q2</span>:'+j.q2+' <span class="def"'+tip('q3')+'>Q3</span>:'+j.q3+' <span class="def"'+tip('dorm')+'>Dorm</span>:'+j.dormant;
   const cards=[
-    card('CPU Avg', j.avgproc+'%', j.nproc+' processor(s)'),
-    card('Users', j.users, j.dialed+' dialed, '+j.net+' net'),
-    card('Paging', j.paging+'/s', 'MDC hit '+j.mdchit+'%'),
-    card('Queues', 'Q0:'+j.q0+' Q1:'+j.q1, 'Q2:'+j.q2+' Q3:'+j.q3+' Dorm:'+j.dormant)
+    card('CPU Avg', j.avgproc+'%', (j.nproc||0)+' processor(s)'+(procs?' | '+procs:''), 'avg'),
+    card('Users', j.users, j.dialed+' dialed, '+j.net+' net', 'users'),
+    card('Paging', j.paging+'/s', 'MDC hit '+j.mdchit+'%', 'paging'),
+    card('Queues', 'Q0:'+j.q0+' Q1:'+j.q1, qsub, 'q1')
   ].join('');
-  const bars=bar('Spool used', j.spoolpct, '#4a9eff')+bar('Page used', j.pagepct, '#f0c36a');
-  document.getElementById('dash').innerHTML=cards+`<div style="background:#181818;border:1px solid #333;border-radius:6px;padding:10px">${bars}</div>`;
+  const bars=(j.vols||[]).map(v=>{
+    const k=v.type.toLowerCase();
+    const c=k==='spool'?'#4a9eff':k==='page'?'#f0c36a':'#9ad17b';
+    return bar(v.vol+' '+v.type, v.pct, c, k);
+  }).join('') || bar('Spool used', j.spoolpct, '#4a9eff','spool')+bar('Page used', j.pagepct, '#f0c36a','page');
+  const extra=`<div style="background:#181818;border:1px solid #333;border-radius:6px;padding:10px;font-size:12px;color:#bbb">
+  <div><span class="def"${tip('mdcrw')}>MDC</span> reads ${j.mdcr||0}/s writes ${j.mdcw||0}/s hit ${j.mdchit||0}%</div>
+  <div><span class="def"${tip('e1')}>E1</span>:${j.e1||0} <span class="def"${tip('e2')}>E2</span>:${j.e2||0} <span class="def"${tip('e3')}>E3</span>:${j.e3||0} <span class="def"${tip('lim')}>Limited</span>:${j.limited||0}</div>
+  <div><span class="def"${tip('disp')}>Disp</span>:${j.disp||0} <span class="def"${tip('elig')}>Elig</span>:${j.elig||0} <span class="def"${tip('dorm')}>Dorm</span>:${j.dormant||0}</div>
+  </div>`;
+  document.getElementById('dash').innerHTML=cards+`<div style="background:#181818;border:1px solid #333;border-radius:6px;padding:10px">${bars}</div>`+extra;
   drawCpu();
 }
 function drawCpu(){
@@ -152,16 +198,42 @@ function drawCpu(){
   <line x1="${pad}" y1="${pad}" x2="${w-pad}" y2="${pad}" stroke="#222"/>
   <polyline fill="none" stroke="#8fd18f" stroke-width="2" points="${pts}"/>`;
 }
+async function pollTop(){
+  try{
+    const r=await fetch('/api/top',{credentials:'same-origin'});
+    const j=await r.json();
+    if(!j.ok) return;
+    const rows=(j.users||[]).map(u=>`<tr><td>${esc(u.id)}</td>
+    <td${tip('ctime')}>${esc(u.ctime||'')}</td>
+    <td${tip('vtime')}>${esc(u.vtime||'')}</td>
+    <td${tip('ttime')}>${esc(u.ttime||'')}</td>
+    <td${tip('io')}>${u.io||0}</td>
+    <td${tip('res')}>${u.res||0}</td>
+    <td${tip('ws')}>${u.ws||0}</td>
+    <td${tip('inst')}>${u.inst||0}</td>
+    <td${tip('pread')}>${u.pread||0}</td>
+    <td${tip('pwrite')}>${u.pwrite||0}</td></tr>`).join('');
+    document.getElementById('top').innerHTML=`<table>
+    <thead><tr><th>User</th><th class="def"${tip('ctime')}>CTIME</th>
+    <th class="def"${tip('vtime')}>VTIME</th><th class="def"${tip('ttime')}>TTIME</th>
+    <th class="def"${tip('io')}>I/O</th><th class="def"${tip('res')}>RES</th>
+    <th class="def"${tip('ws')}>WS</th><th class="def"${tip('inst')}>INSTAN</th>
+    <th class="def"${tip('pread')}>PREAD</th><th class="def"${tip('pwrite')}>PWRIT</th></tr></thead>
+    <tbody>${rows||'<tr><td colspan="10">no data</td></tr>'}</tbody></table>`;
+  }catch(e){}
+}
+function esc(s){return String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));}
 const _login=login;
 login=async function(){
   await _login();
-  if(!CSRF) return;
-  pollPerf(); pollLog();
+  if(document.getElementById('app').style.display==='none') return;
+  pollPerf(); pollLog(); pollTop();
   if(window._perfTimer) clearInterval(window._perfTimer);
   window._perfTimer=setInterval(pollPerf,5000);
   if(window._logTimer) clearInterval(window._logTimer);
   window._logTimer=setInterval(pollLog,10000);
+  if(window._topTimer) clearInterval(window._topTimer);
+  window._topTimer=setInterval(pollTop,60000);
 };
-
 window.addEventListener("load",()=>{ login(); });
 </script></body></html>

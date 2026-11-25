@@ -86,6 +86,10 @@ handle: procedure expose cfg. sess. ev. evn known. ev_init
     call api_syslog cs, tok
     return
   end
+  if method = 'GET' & path = '/api/top' then do
+    call api_top cs, tok
+    return
+  end
   if method \= 'POST' then do
     call serve_json cs, 405, '{"ok":false,"error":"method not allowed"}'
     return
@@ -449,6 +453,7 @@ run_cmd: procedure expose cfg.
   pcmd = ''
   if abbrev(ucmd, 'CP ') then pcmd = 'PIPE CP' substr(cmd, 4)
   else if verb = 'TYPE' then pcmd = 'PIPE <' substr(cmd, 5)
+  else if verb = 'INDICATE' then pcmd = 'PIPE CP' cmd
   if pcmd \= '' then do
     pcmd '| stem OUT.'
     crc = rc
@@ -570,6 +575,87 @@ audit: procedure expose cfg.
 
 /* --- Performance dashboard --- */
 
+api_top: procedure expose cfg. sess.
+  parse arg cs, tok
+  if \cfg.noauth & \sess_ok(tok) then do
+    call serve_json cs, 401, '{"ok":false,"error":"not logged in"}'
+    return
+  end
+  parse value run_cmd('CP QUERY NAMES') with rc '|' nout
+  nu. = 0
+  ucount = 0
+  do while nout \= ''
+    parse var nout line '0A'x nout
+    line = translate(strip(line))
+    do while line \= ''
+      parse var line piece ',' line
+      parse var piece uid '-' .
+      uid = strip(uid)
+      if uid = '' then iterate
+      if words(uid) > 1 then iterate
+      if nu.uid = 1 then iterate
+      nu.uid = 1
+      ucount = ucount + 1
+      ulist.ucount = uid
+    end
+  end
+  j = '{"ok":true,"users":['
+  first = 1
+  do i = 1 to ucount
+    uid = ulist.i
+    parse value run_cmd('CP INDICATE USER' uid) with irc '|' iout
+    uj = top_parse(uid, iout)
+    if uj = '' then iterate
+    if \first then j = j || ','
+    j = j || uj
+    first = 0
+  end
+  j = j || ']}'
+  call serve_json cs, 200, j
+  return
+
+top_parse: procedure
+  parse arg uid, out
+  vtime = ''; ttime = ''; ctime = ''
+  io = 0; res = 0; ws = 0; inst = 0
+  pread = 0; pwrite = 0
+  do while out \= ''
+    parse var out line '0A'x out
+    u = translate(strip(line))
+    if pos('CTIME=', u) > 0 then do
+      parse var u . 'CTIME=' ct 'VTIME=' vt 'TTIME=' tt .
+      ctime = strip(ct); vtime = strip(vt); ttime = strip(tt)
+    end
+    if pos('IO=', u) > 0 then do
+      parse var u . 'IO=' iv .
+      iv = strip(iv)
+      if datatype(iv,'W') then io = iv + 0
+    end
+    if pos('PAGES:', u) > 0 then do
+      parse var u . 'RES=' rv . 'WS=' wv .
+      if datatype(strip(rv),'W') then res = strip(rv) + 0
+      if datatype(strip(wv),'W') then ws = strip(wv) + 0
+    end
+    if pos('INSTAN=', u) > 0 then do
+      parse var u . 'INSTAN=' iv2 .
+      if datatype(strip(iv2),'W') then inst = strip(iv2) + 0
+    end
+    if pos('READS=', u) > 0 & pos('WRITES=', u) > 0 then do
+      if pos('MDC', u) > 0 then iterate
+      parse var u . 'READS=' pr . 'WRITES=' pw .
+      if datatype(strip(pr),'W') then pread = strip(pr) + 0
+      if datatype(strip(pw),'W') then pwrite = strip(pw) + 0
+    end
+  end
+  if vtime = '' & ttime = '' & io = 0 then return ''
+  uj = '{"id":"'json_esc(uid)'",'
+  uj = uj || '"ctime":"'json_esc(ctime)'",'
+  uj = uj || '"vtime":"'json_esc(vtime)'",'
+  uj = uj || '"ttime":"'json_esc(ttime)'",'
+  uj = uj || '"io":'io',"res":'res',"ws":'ws',"inst":'inst','
+  uj = uj || '"pread":'pread',"pwrite":'pwrite'}'
+  return uj
+
 api_syslog: procedure expose cfg. sess. ev. evn known. ev_init
   parse arg cs, tok
   if \cfg.noauth & \sess_ok(tok) then do
@@ -653,28 +739,53 @@ api_perf: procedure expose cfg. sess.
 
 perf_collect: procedure expose cfg.
   avg = 0; nproc = 0; paging = 0; mdc = 0
+  mdcr = 0; mdcw = 0
   q0=0; q1=0; q2=0; q3=0; dorm=0
+  e1=0; e2=0; e3=0; lim=0
   users=0; dialed=0; net=0
+  disp=0; elig=0
   spool_pct=0; page_pct=0
+  proc.0 = 0
+  vol.0 = 0
   parse value run_cmd('CP INDICATE LOAD') with rc '|' out
   call perf_parse_load out
+  parse value run_cmd('CP INDICATE ACTIVE') with rc '|' aout
+  call perf_parse_active aout
   parse value run_cmd('CP QUERY USERS') with rc '|' uout
   call perf_parse_users uout
-  parse value run_cmd('CP QUERY ALLOC SPOOL') with rc '|' sout
-  parse value run_cmd('CP QUERY ALLOC PAGE') with rc '|' pout
-  call perf_parse_alloc2 sout, pout
+  parse value run_cmd('CP QUERY ALLOC') with rc '|' a2
+  call perf_parse_alloc a2
   j = '{"ok":true,'
   j = j || '"avgproc":'avg','
   j = j || '"nproc":'nproc','
   j = j || '"paging":'paging','
   j = j || '"mdchit":'mdc','
-  j = j || '"q0":'q0',"q1":'q1',"q2":'q2',"q3":'q3',"dormant":'dorm','
+  j = j || '"mdcr":'mdcr',"mdcw":'mdcw','
+  j = j || '"q0":'q0',"q1":'q1',"q2":'q2',"q3":'q3','
+  j = j || '"e1":'e1',"e2":'e2',"e3":'e3','
+  j = j || '"dormant":'dorm',"limited":'lim','
   j = j || '"users":'users',"dialed":'dialed',"net":'net','
-  j = j || '"spoolpct":'spool_pct',"pagepct":'page_pct'}'
+  j = j || '"disp":'disp',"elig":'elig','
+  j = j || '"spoolpct":'spool_pct',"pagepct":'page_pct','
+  j = j || '"procs":['
+  do i = 1 to proc.0
+    if i > 1 then j = j || ','
+    j = j || '{"id":"'proc.i.id'","pct":'proc.i.pc'}'
+  end
+  j = j || '],"vols":['
+  do i = 1 to vol.0
+    if i > 1 then j = j || ','
+    j = j || '{"vol":"'vol.i.vol'","type":"'vol.i.type'",'
+    j = j || '"used":'vol.i.used',"total":'vol.i.total','
+    j = j || '"pct":'vol.i.pc'}'
+  end
+  j = j || ']}'
   return j
 
-perf_parse_load: procedure expose avg nproc paging mdc q0 q1 q2 q3 dorm
+perf_parse_load: procedure expose avg nproc paging mdc mdcr mdcw,
+  q0 q1 q2 q3 dorm e1 e2 e3 lim proc.
   parse arg out
+  proc.0 = 0
   do while out \= ''
     parse var out line '0A'x out
     line = strip(line)
@@ -688,6 +799,11 @@ perf_parse_load: procedure expose avg nproc paging mdc q0 q1 q2 q3 dorm
       parse var u . 'PAGING-' pg '/SEC' .
       if datatype(pg,'W') then paging = pg + 0
     end
+    if pos('MDC READS-', u) > 0 then do
+      parse var u . 'MDC READS-' mr '/SEC WRITES-' mw '/SEC' .
+      if datatype(mr,'W') then mdcr = mr + 0
+      if datatype(mw,'W') then mdcw = mw + 0
+    end
     if pos('HIT RATIO-', u) > 0 then do
       parse var u . 'HIT RATIO-' hr '%' .
       if datatype(hr,'W') then mdc = hr + 0
@@ -700,17 +816,53 @@ perf_parse_load: procedure expose avg nproc paging mdc q0 q1 q2 q3 dorm
         if datatype(d,'W') then dorm = d + 0
       end
     end
-    if abbrev(u,'Q1-') then do
-      parse var u 'Q1-' v '(' .
-      if datatype(v,'W') then q1 = v + 0
+    if abbrev(u,'Q1-') then call perf_q u, 'Q1', 'q1'
+    if abbrev(u,'Q2-') then call perf_q u, 'Q2', 'q2'
+    if abbrev(u,'Q3-') then call perf_q u, 'Q3', 'q3'
+    if pos('E1-', u) > 0 then call perf_q u, 'E1', 'e1'
+    if pos('E2-', u) > 0 then call perf_q u, 'E2', 'e2'
+    if pos('E3-', u) > 0 then call perf_q u, 'E3', 'e3'
+    if pos('LIMITED-', u) > 0 then do
+      parse var u . 'LIMITED-' lv .
+      if datatype(lv,'W') then lim = lv + 0
     end
-    if abbrev(u,'Q2-') then do
-      parse var u 'Q2-' v '(' .
-      if datatype(v,'W') then q2 = v + 0
+    if pos('PROC ', u) > 0 then call perf_parse_procs u
+  end
+  return
+
+perf_q: procedure expose q1 q2 q3 e1 e2 e3
+  parse arg u, key, var
+  parse var u . (key) '-' v '(' .
+  if \datatype(v,'W') then return
+  call value var, v + 0
+  return
+
+perf_parse_procs: procedure expose proc.
+  parse arg u
+  rest = u
+  do while pos('PROC ', rest) > 0
+    parse var rest . 'PROC ' pid '-' pct '%' rest
+    pid = strip(pid)
+    if datatype(pct,'W') then do
+      n = proc.0 + 1
+      proc.0 = n
+      proc.n.id = pid
+      proc.n.pc = pct + 0
     end
-    if abbrev(u,'Q3-') then do
-      parse var u 'Q3-' v '(' .
-      if datatype(v,'W') then q3 = v + 0
+  end
+  return
+
+perf_parse_active: procedure expose users disp elig dorm
+  parse arg out
+  do while out \= ''
+    parse var out line '0A'x out
+    u = translate(strip(line))
+    if pos('USERS,', u) > 0 & pos('DISP,', u) > 0 then do
+      parse var u us 'USERS,' ds 'DISP,' el 'ELIG,' dm 'DORM' .
+      if datatype(strip(us),'W') then users = strip(us) + 0
+      if datatype(strip(ds),'W') then disp = strip(ds) + 0
+      if datatype(strip(el),'W') then elig = strip(el) + 0
+      if datatype(strip(dm),'W') then dorm = strip(dm) + 0
     end
   end
   return
@@ -720,32 +872,49 @@ perf_parse_users: procedure expose users dialed net
   do while out \= ''
     parse var out line '0A'x out
     u = translate(strip(line))
-    if pos('USERS,', u) > 0 then do
-      parse var u us 'USERS,' . di 'DIALED,' . ne 'NET' .
-      if datatype(strip(us),'W') then users = strip(us) + 0
-      if datatype(strip(di),'W') then dialed = strip(di) + 0
-      if datatype(strip(ne),'W') then net = strip(ne) + 0
-    end
+    if pos('USERS,', u) = 0 then iterate
+    if pos('DIALED,', u) = 0 then iterate
+    parse var u us 'USERS,' . di 'DIALED,' . ne 'NET' .
+    if datatype(strip(us),'W') then users = strip(us) + 0
+    if datatype(strip(di),'W') then dialed = strip(di) + 0
+    if datatype(strip(ne),'W') then net = strip(ne) + 0
   end
   return
 
-perf_parse_alloc2: procedure expose spool_pct page_pct
-  parse arg sout, pout
-  spool_pct = perf_pct_used(sout)
-  page_pct = perf_pct_used(pout)
-  return
-
-perf_pct_used: procedure
+perf_parse_alloc: procedure expose vol. spool_pct page_pct
   parse arg out
-  pct = 0
+  vol.0 = 0
+  st = 0; su = 0; pt = 0; pu = 0
+  cur = ''
   do while out \= ''
     parse var out line '0A'x out
     u = translate(strip(line))
-    if abbrev(u, 'USABLE') | abbrev(u, 'SUMMARY') then do
-      w = words(u)
-      t = word(u, w)
-      t = strip(t, 'T', '%')
-      if datatype(t, 'W') then pct = t + 0
+    if abbrev(u, 'DASD ') then do
+      parse var u 'DASD' . vname .
+      cur = strip(vname)
+      iterate
+    end
+    if cur = '' then iterate
+    if abbrev(u, 'SPOOL') | abbrev(u, 'PAGE') | abbrev(u, 'DRCT') then do
+      parse var u typ 'TOTAL=' t 'INUSE=' iu 'AVAIL=' .
+      typ = strip(typ)
+      if \datatype(t,'W') | \datatype(iu,'W') then iterate
+      t = t + 0; iu = iu + 0
+      if typ = 'SPOOL' then do; st = st + t; su = su + iu; end
+      if typ = 'PAGE' then do; pt = pt + t; pu = pu + iu; end
+      if t = 0 then iterate
+      pct = format(iu * 100 / t,,0)
+      n = vol.0 + 1
+      vol.0 = n
+      vol.n.vol = cur
+      vol.n.type = typ
+      vol.n.used = iu
+      vol.n.total = t
+      vol.n.pc = pct + 0
     end
   end
-  return pct
+  if st > 0 then spool_pct = format(su * 100 / st,,0) + 0
+  else spool_pct = 0
+  if pt > 0 then page_pct = format(pu * 100 / pt,,0) + 0
+  else page_pct = 0
+  return
