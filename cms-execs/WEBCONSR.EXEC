@@ -27,6 +27,7 @@ if rc \= 0 then call die 'Bind' rc
 parse value socket('Listen', lsid, 5) with rc .
 if rc \= 0 then call die 'Listen' rc
 say 'WEBCONSR: listening on port' cfg.port
+signal on syntax name err_h
 
 do forever
   parse value socket('Accept', lsid) with rc cs .
@@ -41,6 +42,12 @@ end
 call socket 'Close', lsid
 call socket 'Terminate'
 exit 0
+
+err_h:
+  zline = sourceline(sigl)
+  zmsg = 'ERR' rc 'LINE' sigl ':' zline 'EVN=' evn 'K=' known.0
+  'EXECIO 1 DISKW WEBCON ERR A (STRING' zmsg
+  exit 20
 
 die: procedure expose cfg.
   parse arg what rc
@@ -611,9 +618,13 @@ api_syslog: procedure expose cfg. sess. ev. evn known. ev_init
 
 ev_add: procedure expose ev. evn
   parse arg ts, text
+  if datatype(evn,'W') = 0 then evn = 0
   if evn < 50 then evn = evn + 1
-  do i = evn to 2 by -1
-    ev.i = ev.i - 1
+  i = evn
+  do while i > 1
+    j = i - 1
+    ev.i = ev.j
+    i = j
   end
   ev.1 = ts text
   return
