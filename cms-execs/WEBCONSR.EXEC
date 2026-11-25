@@ -436,9 +436,21 @@ glob_match: procedure
 run_cmd: procedure expose cfg.
   parse arg cmd
   out = ''
-  ucmd = translate(strip(cmd))
-  if abbrev(ucmd, 'CP ') then do
-    'PIPE CP' substr(cmd, 4) '| stem OUT.'
+  cmd = strip(cmd)
+  parse var cmd verb rest
+  verb = translate(verb)
+  if rest = '' then cmd = verb
+  else if verb = 'CP' then cmd = 'CP ' || translate(rest)
+  else if verb = 'QUERY' | verb = 'INDICATE' |,
+          verb = 'LISTFILE' | verb = 'TYPE' then,
+    cmd = verb || ' ' || translate(rest)
+  else cmd = verb rest
+  ucmd = translate(cmd)
+  pcmd = ''
+  if abbrev(ucmd, 'CP ') then pcmd = 'PIPE CP' substr(cmd, 4)
+  else if verb = 'TYPE' then pcmd = 'PIPE <' substr(cmd, 5)
+  if pcmd \= '' then do
+    pcmd '| stem OUT.'
     crc = rc
     if symbol('OUT.0') = 'VAR' then n = OUT.0
     else n = 0
