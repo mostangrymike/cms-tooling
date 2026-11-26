@@ -4,6 +4,10 @@ Newest first. What landed, not proof claims. Detailed work log is `NOTES.md`.
 
 ## Unreleased
 
+- Record the operator-requested CMS A sed/awk test-fixture cleanup. Only
+  `S2TSCR`, `S2TDATA`, `T1`–`T6`, and `D1`/`D2` were erased, after packing all ten
+  into `CMSUTTST VMARC A`; final `STATE`/`VMARC LIST` checks confirmed absence and
+  recoverability. Sources, modules, and host tests were retained.
 - Restore the host GitHub TLS bridge in documented `http` mode on
   `192.168.200.1:8443`, with closed repo/push allowlists and guest credential
   pass-through. Local `/healthz` and smart-HTTP discovery passed; 44 bridge

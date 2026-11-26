@@ -156,10 +156,14 @@ Rules for evidence:
   The active `CANDGD` web-console candidate had dropped both `MDISK 600` and
   `MDISK 0601`; only GIT600 was restored through fixed-80 candidate
   `CANDGF80 DIRECT A`. See [`DIRMAINT_REMOVAL.md`](DIRMAINT_REMOVAL.md).
-- Restored GIT600 supported a real synthetic `cms-git` M301 `GIT MERGE` test.
+- Restored GIT600 supported real synthetic `cms-git` M301–M303 merge tests.
   All temporary runtime/ref/worktree replacements were restored from `M301BK`
-  backups and verified identical. This is target evidence for that test only,
+  backups and verified identical. This is target evidence for those tests only,
   not a production rollout.
+- At operator request, the ten CMS A sed/awk fixtures `S2TSCR`, `S2TDATA`,
+  `T1`–`T6`, and `D1`/`D2` were erased only after packing them into
+  `CMSUTTST VMARC A`. Final `STATE`/`VMARC LIST` checks confirmed all ten are
+  absent and recoverable; sources, modules, and host tests were retained.
 
 ## Known defects and documentation gaps
 

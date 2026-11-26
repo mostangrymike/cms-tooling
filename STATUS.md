@@ -8,8 +8,8 @@ disagrees with this page, this page wins. Last updated 2026-11-26.
 | Field | Value |
 |---|---|
 | Branch | `main` |
-| Latest commit | `f8e3404` — add `cms-utils` (CMSED/CMSAWK) |
-| Working tree | uncommitted capability inventory plus bridge/GIT600 recovery documentation |
+| Latest commit | see `git log -1 --oneline`; includes capability inventory and CMS A cleanup record |
+| Working tree | clean; CMS A sed/awk fixture cleanup documented below |
 | Build | `python3 -B build_cms_tooling.py` (offline, no CMS) |
 | Tests | 125 tests, 0 failures/errors; Python 3.12 and 3.14 |
 | CI | `cms tooling offline build` and `Offline tests (profiles)` — **green** |
@@ -103,9 +103,18 @@ link/access now expose `GIT600`. Rollback is `DIRECTXA CANDGD DIRECT C`;
 `CANDGD DRBK26 C` is the byte-identical pre-change backup. `MDISK 0601` remains
 absent. No FORMAT or GIT600 data rewrite occurred.
 
-This restoration enabled the real CMS M301 `GIT MERGE` validation recorded in
-the `cms-git` repository. All test runtime/ref/worktree files were restored from
-`M301BK` backups afterward.
+This restoration enabled real synthetic `cms-git` M301–M303 merge validation
+recorded in the `cms-git` repository. All test runtime/ref/workfile files were
+restored from `M301BK` backups afterward.
+
+## CMS A sed/awk fixture cleanup — 2026-11-26
+
+At the operator's request, only these ten test fixtures were erased from A:
+`S2TSCR SED A1`, `S2TDATA DATA A1`, `T1`–`T6 AWK A1`, and `D1`/`D2 DATA A1`.
+Before deletion they were packed into `CMSUTTST VMARC A`; a final read-only
+`STATE`/`VMARC LIST` pass confirmed every fixture is absent and all ten are
+recoverable from that archive. CMSED/CMSAWK sources, modules, and host test files
+were not removed.
 
 ## What is not done
 
