@@ -1,14 +1,15 @@
 # Status
 
 **Canonical current-state file for `cms-tooling`.** If any other document
-disagrees with this page, this page wins. Last updated 2026-11-23.
+disagrees with this page, this page wins. Last updated 2026-11-26.
 
 ## Right now
 
 | Field | Value |
 |---|---|
 | Branch | `main` |
-| Latest commit | `c4f40b0` — index minidisks and add `FIND` |
+| Latest commit | `f8e3404` — add `cms-utils` (CMSED/CMSAWK) |
+| Working tree | uncommitted capability inventory plus bridge/GIT600 recovery documentation |
 | Build | `python3 -B build_cms_tooling.py` (offline, no CMS) |
 | Tests | 125 tests, 0 failures/errors; Python 3.12 and 3.14 |
 | CI | `cms tooling offline build` and `Offline tests (profiles)` — **green** |
@@ -25,7 +26,10 @@ disagrees with this page, this page wins. Last updated 2026-11-23.
 - Read-only minidisk planner, directory plan, inventory, and receipt-gated
   lifecycle (`cms_mdisk_*`).
 - Host-side plain-HTTP-to-HTTPS bridge with policy/credential boundary
-  (`github_tls_bridge.py`).
+  (`github_tls_bridge.py`). Restored 2026-11-26 in `http` mode on
+  `192.168.200.1:8443` with closed repository/push allowlists and guest
+  credential pass-through; 44 bridge tests and the 125-test offline build
+  passed. CMS-side bridge use remains unproven.
 - CMS↔BFS ASCII text bridge (`cms-execs/CMS2BFS.EXEC`, `cms-execs/BFS2CMS.EXEC`)
   built on `OPENVM PUTBFS`/`GETBFS` with explicit `1047`↔`819` translation;
   round trips verified byte-exact.
@@ -64,7 +68,7 @@ Details: [`docs/OE_BFS.md`](docs/OE_BFS.md),
 
 ## DirMaint removal
 
-Phases 1–3 are complete; activation is held.
+Phases 1–4 are complete.
 
 | Phase | State |
 |---|---|
@@ -78,14 +82,46 @@ references them. `CANDFIN DIRECT` is unchanged and is the rollback source.
 `DIRECTXA` is not a CP command here — the module is on `PMAINT 551`, which must
 be accessed. Details: [`docs/DIRMAINT_REMOVAL.md`](docs/DIRMAINT_REMOVAL.md).
 
+## GIT600 directory restoration — 2026-11-26
+
+The active directory had lost `MAINT 0600` (GIT600). The web-console candidates
+`CANDWEB`, `CANDGE`, and `CANDGD` each dropped both `MDISK 600` and `MDISK 0601`
+while adding `WEBCONS`; the live `WEBCONS` privilege classes `DEG` identified
+`CANDGD` as the active source. `CANDFIN`, `CANDNODM`, and `M173NEW` retained the
+GIT600 record.
+
+A new fixed-80 candidate `CANDGF80 DIRECT A` restored only:
+
+```text
+MDISK 600 3390 6000 1600 VMCOM1 W
+```
+
+`DIRECTXA CANDGF80 DIRECT A (EDIT` passed, and explicit approval was followed by
+`DIRECTXA CANDGF80 DIRECT A`: `EOJ DIRECTORY UPDATED AND ON LINE`, 58 disk
+pages. `CP QUERY MDISK USERID MAINT 0600 DIRECTORY` and a fresh read-only
+link/access now expose `GIT600`. Rollback is `DIRECTXA CANDGD DIRECT C`;
+`CANDGD DRBK26 C` is the byte-identical pre-change backup. `MDISK 0601` remains
+absent. No FORMAT or GIT600 data rewrite occurred.
+
+This restoration enabled the real CMS M301 `GIT MERGE` validation recorded in
+the `cms-git` repository. All test runtime/ref/worktree files were restored from
+`M301BK` backups afterward.
+
 ## What is not done
 
+- Telnet credential logging defect: `connect()` sends the password through
+  `_send()`, which can write verbose/session logs. Avoid `-v` and `--log` until
+  redaction is fixed; FTP convenience functions also default to
+  `/tmp/cms_driver.log`.
+- `CmsSession.connect()` currently hardcodes `LOGON MAINT`; `--interrupt-after`
+  is parsed but unused; `CommandResult.ok` treats `rc=None` as success, so
+  callers must distinguish missing RC capture from numeric RC 0.
 - No live production rollout; planner and lifecycle are offline/read-only.
 - Deletion remains plan-only behind signed receipts.
 - No dedicated offline end-to-end lifecycle harness (plan → create → activate
   → delete) beyond profile resolution tests.
-- No CMSToBFS bridge: no file-format/encoding conversion, no `make`/`c89`
-  driver that emits a CMS MODULE.
+- No general binary/MODULE BFS bridge or NAPI build driver; `CMS2BFS` and
+  `BFS2CMS` cover ASCII text only, and `c89` has no compiler backend.
 - DirMaint removal is complete through phase 4; `CANDFIN DIRECT` remains on 02CC as the rollback source.
 
 ## Protected CMS files (standing rule, 2026-11-22)

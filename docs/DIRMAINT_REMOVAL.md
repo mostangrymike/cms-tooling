@@ -105,3 +105,54 @@ accessed). `CANDFIN DIRECT` is still on `MAINT 02CC`, unchanged.
 - Do not reuse or release DirMaint-owned extents as part of this change.
 - Do not edit `CANDFIN DIRECT` in place; always derive a new candidate.
 - Do not reuse or release DirMaint extents as part of this change.
+
+## 2026-11-26 — restore the GIT600 minidisk definition
+
+### Root cause
+
+The active directory matched `CANDGD DIRECT C`: `WEBCONS` existed with privilege
+classes `DEG`, while `CP QUERY MDISK USERID MAINT 0600 DIRECTORY` returned
+`HCPQMD040E`. Diffing every `* DIRECT` file on `MAINT 02CC` showed that
+`CANDWEB`, `CANDGE`, and `CANDGD` each removed exactly two MAINT records while
+adding `WEBCONS`:
+
+```text
+MDISK 600 3390 6000 1600 VMCOM1 W
+MDISK 0601 3390 3331 72 M01W01 W
+```
+
+`USER DIRECT` and `M173BAK DIRECT` also lacked both. `CANDFIN`, `CANDNODM`, and
+`M173NEW` retained the GIT600 record. The loss therefore came from the
+web-console candidate change, not the DirMaint removal.
+
+### Recovery performed
+
+1. Copied active `CANDGD DIRECT C` to new backup `CANDGD DRBK26 C`; `COMPARE`
+   was silent/identical.
+2. Derived `CANDG600 DIRECT A` and used native `PATCH` to insert only the GIT600
+   line after the unique `MDISK 29D` anchor. `(CHECK` predicted 4296 → 4297.
+3. Normalized to fixed 80-byte records as `CANDGF80 DIRECT A`; `LISTFILE` showed
+   `F 80 4297`.
+4. Ran `DIRECTXA CANDGF80 DIRECT A (EDIT`: `EOJ DIRECTORY NOT UPDATED`, no
+   diagnostics.
+5. After explicit approval, ran `DIRECTXA CANDGF80 DIRECT A`:
+   `EOJ DIRECTORY UPDATED AND ON LINE`, `HCPDIR494I User directory occupies 58
+   disk pages`.
+6. Verified `CP QUERY MDISK USERID MAINT 0600 DIRECTORY` returns
+   `MAINT 0600 MAINT 0600`, `WEBCONS` remains `DEG`, and a fresh read-only
+   link/access exposes `GIT600` with `GITMETA REPO G` and `GIT EXEC G`.
+
+### Rollback and retained artifacts
+
+```text
+ACCESS 02CC C
+CP LINK PMAINT 551 298 RR
+ACCESS 298 D
+DIRECTXA CANDGD DIRECT C
+CP DETACH 298
+```
+
+`CANDGD DRBK26 C` is the byte-identical pre-change source. `CANDGF80 DIRECT A`
+is the validated/activated candidate. `CANDFIN`, `CANDNODM`, and `M173NEW`
+remain independent older references. `MDISK 0601` was deliberately not restored.
+No FORMAT, GIT600 data rewrite, or object deletion occurred.

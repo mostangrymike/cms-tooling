@@ -4,6 +4,19 @@ Newest first. What landed, not proof claims. Detailed work log is `NOTES.md`.
 
 ## Unreleased
 
+- Restore the host GitHub TLS bridge in documented `http` mode on
+  `192.168.200.1:8443`, with closed repo/push allowlists and guest credential
+  pass-through. Local `/healthz` and smart-HTTP discovery passed; 44 bridge
+  tests and the full 125-test offline build passed. CMS-side bridge use remains
+  unproven.
+- Add `docs/CAPABILITIES.md`: source-grounded inventory of Telnet/FTP,
+  profiles/credentials, minidisk planning, FIND, CMS/BFS bridges, MKMODULE,
+  PATCH/GREP, TLS bridge, offline build, target limits, and `cms-git` integration.
+- Restore `MAINT 0600` (GIT600) to the CP directory after tracing its loss to
+  the `CANDWEB`/`CANDGE`/`CANDGD` web-console candidates. New fixed-80 candidate
+  `CANDGF80 DIRECT A` passed `DIRECTXA (EDIT` and was activated with approval;
+  58 disk pages. Rollback is `CANDGD DIRECT C`, with `CANDGD DRBK26 C` as the
+  byte-identical backup. `MDISK 0601` remains absent; no FORMAT occurred.
 - DirMaint removal phase 2: `AUTOLOG1 191 PROFILE EXEC` now comments out
   `Call Dirm` and sets `rrc = 0` (220 records). `PROFILE EXECP2` keeps the
   pre-change content; the live file was downloaded and compared byte-for-byte

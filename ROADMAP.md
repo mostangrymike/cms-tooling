@@ -71,3 +71,18 @@ Verified environment facts are in `docs/OE_BFS.md` and
 - **Missing utilities** in the guest: `patch`, `jq`, `curl`, `base64`,
   `sha256sum`, `timeout`. `patch` is now served natively by `PATCH.EXEC`;
   decide the rest per tool (small C implementation or a shell substitute).
+
+## 7. Security and correctness defects
+
+- Fix Telnet password logging: `CmsSession.connect()` currently sends the
+  password through `_send()`, which can write verbose/session logs. Add a
+  redaction regression test before using `-v` or `--log` again.
+- Make the logon userid configurable; `connect()` currently hardcodes `MAINT`
+  even when credentials/profiles name another user.
+- Implement or remove `--interrupt-after`; it is parsed but unused.
+- Make `CommandResult.ok` distinguish `rc=None` (no RC captured) from numeric
+  RC 0, or provide an explicit `rc_known` field.
+- Reconcile bridge packaging: `BRIDGE.md`/`AGENTS.md` say the host bridge is not
+  shipped, but the current build manifest includes it and its test.
+- Qualify CMS-side bridge clone/pull/push on a disposable repository; host
+  health/discovery alone is not target proof.

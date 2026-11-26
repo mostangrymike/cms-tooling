@@ -73,3 +73,59 @@ continue in the native client repository.
   `HCPLNM053E ... not in CP directory`. `QUERY USER` for DIRMAINT, DIRMSAT,
   DATAMOVE, 6VMDIR30 -> `HCPCQU045E ... not logged on`. `CANDFIN DIRECT`
   remains on 02CC for rollback via DIRECTXA.
+
+## 2026-11-26 — TLS bridge, capability inventory, and GIT600 recovery
+
+### Host TLS bridge
+
+The old listener (PID 53158) was idle in `accept`, not deadlocked. Host curls to
+`192.168.200.1` timed out because macOS routed that address through the LAN
+gateway instead of loopback; direct GitHub HTTPS returned 200. The bridge was
+stopped and restarted as PID 47711 in documented `http` mode on
+`192.168.200.1:8443`, closed policy, allowlisted `mostangrymike/cms-git` and
+`mostangrymike/cms-git-push-test`, push restricted to the test repository, and
+`--auth-mode pass` because no host token file exists. Log:
+`.local/github_tls_bridge.log` (0600). A temporary loopback instance returned
+200 for `/healthz` and smart-HTTP discovery; 44 bridge tests and the full
+125-test offline build passed. The host loopback route remains an operator
+option; it is not required for the CMS VMnet path. CMS-side bridge use remains
+unproven.
+
+### Capability inventory and safety defect
+
+Added `docs/CAPABILITIES.md` and indexed it in `docs/INDEX.md`. The inventory
+was checked against source/tests; 52 targeted unit tests and two strict C89
+syntax checks passed. It records that minidisk creation/activation/deletion
+execution is not implemented in this repository, and it separates live-proven,
+offline-tested, plan-only, and unverified capabilities.
+
+The review found a credential-logging defect: `CmsSession.connect()` sends the
+password through `_send()`, which can write verbose/session logs. One probe log
+created during this session was deleted immediately. Avoid `-v` and `--log`
+until redaction is fixed. Also recorded: `connect()` hardcodes `LOGON MAINT`,
+`--interrupt-after` is unused, and `rc=None` is not proof of success.
+
+### GIT600 CP-directory recovery
+
+Live `WEBCONS` classes `DEG` matched `CANDGD`. Diffs showed `CANDWEB`, `CANDGE`,
+and `CANDGD` each removed `MDISK 600` (GIT600) and `MDISK 0601` while adding
+`WEBCONS`; `USER`/`M173BAK` also lacked both, while `CANDFIN`, `CANDNODM`, and
+`M173NEW` retained GIT600. The earlier DirMaint removal was not the cause.
+
+Created `CANDGD DRBK26 C` as a byte-identical backup. Derived `CANDG600 DIRECT
+A`, inserted only `MDISK 600 3390 6000 1600 VMCOM1 W` with native `PATCH`, and
+normalized to fixed-80 `CANDGF80 DIRECT A` (4297 records). `DIRECTXA ... (EDIT`
+passed. After explicit approval, activation returned `EOJ DIRECTORY UPDATED AND
+ON LINE`, 58 disk pages. CP query and fresh read-only link/access confirmed
+GIT600. Rollback: `DIRECTXA CANDGD DIRECT C`. `MDISK 0601` remains absent. No
+FORMAT or GIT600 data rewrite occurred.
+
+### cms-git M301 support
+
+The restored GIT600 target allowed a real synthetic `GIT MERGE` validation in
+`cms-git`. The test deployed five runtime EXECs with `M301BK` backups, created
+two disjoint branches, produced two-parent commit
+`868157275B4ADFFBDA05C1E22CEDBF8544A49F34`, applied both changes, and verified
+clean status. Every runtime/ref/worktree backup was restored and compared
+identical afterward. Test objects and staging artifacts remain; no deletion was
+performed. Details are in `cms-git/NOTES.md`.
